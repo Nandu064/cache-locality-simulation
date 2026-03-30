@@ -496,9 +496,9 @@ if __name__ == "__main__":
         "mrc_by_clients": {k: v for k, v in mrc_clients.items()},
     }
 
-    with open("results_v2.json", "w") as f:
+    with open("results.json", "w") as f:
         json.dump(output, f, indent=2)
 
-    print("\nAll results saved to results_v2.json")
+    print("\nAll results saved to results.json")
     print(f"Total conditions run: {len(conc_results) + len(alpha_results)}")
     print(f"Total trials: {(len(conc_results) + len(alpha_results)) * N_TRIALS}")
