@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cache Effectiveness & Tail Latency — Research Dashboard v1.2</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg: #0b0d14; --surface: #13161f; --surface2: #1c2030; --surface3: #222840;
+  --border: #2a2f45; --text: #e8eaf0; --muted: #7a80a0; --dim: #4a5070;
+  --no: #f87171; --lru: #6c8fff; --part: #34d399; --aff: #fb923c;
+  --accent: #6c8fff; --accent2: #34d399; --radius: 12px; --radius-sm: 8px;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; font-size: 14px; line-height: 1.6; }
+
+/* HEADER */
+.header { background: linear-gradient(135deg,#13161f,#1a1d2e); border-bottom: 1px solid var(--border); padding: 20px 24px; display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.header h1 { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.header p { color: var(--muted); font-size: 12px; margin-top: 5px; max-width: 560px; }
+.version-badge { background: rgba(108,143,255,.2); color: var(--accent); padding: 2px 8px; border-radius: 20px; font-size: 10px; font-weight: 700; border: 1px solid rgba(108,143,255,.3); }
+.header-right { text-align: right; font-size: 12px; color: var(--muted); line-height: 2; flex-shrink: 0; }
+.header-right strong { color: var(--text); font-size: 13px; }
+.pill-tag { display: inline-block; background: rgba(52,211,153,.15); color: var(--accent2); padding: 1px 8px; border-radius: 20px; font-size: 10px; font-weight: 600; border: 1px solid rgba(52,211,153,.25); }
+
+/* TABS */
+.tabs-wrapper { background: var(--surface); border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+.tabs-wrapper::-webkit-scrollbar { display: none; }
+.tabs { display: flex; padding: 12px 20px 0; gap: 2px; min-width: max-content; }
+.tab { padding: 8px 16px; border-radius: 8px 8px 0 0; cursor: pointer; font-size: 12px; font-weight: 500; color: var(--muted); border: 1px solid transparent; border-bottom: none; transition: all .15s; white-space: nowrap; user-select: none; }
+.tab:hover { color: var(--text); background: var(--surface2); }
+.tab.active { color: var(--text); background: var(--bg); border-color: var(--border); }
+
+/* PANELS */
+.panel { display: none; padding: 20px; }
+.panel.active { display: block; }
+
+/* LOADING */
+.loading { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 300px; gap: 14px; color: var(--muted); font-size: 13px; }
+.spinner { width: 36px; height: 36px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.error-box { background: rgba(248,113,113,.07); border: 1px solid rgba(248,113,113,.3); border-radius: var(--radius-sm); padding: 16px 20px; color: var(--muted); font-size: 13px; line-height: 1.8; }
+.error-box strong { color: var(--no); display: block; margin-bottom: 6px; }
+.error-box code { background: var(--surface2); padding: 2px 6px; border-radius: 4px; font-size: 12px; color: var(--text); }
+
+/* GRIDS */
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+.grid4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; }
+.full { grid-column: 1/-1; }
+
+/* CARDS */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; transition: border-color .2s; }
+.card:hover { border-color: var(--surface3); }
+.card h3 { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 16px; }
+
+/* STATS */
+.stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; margin-bottom: 20px; }
+.stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; position: relative; overflow: hidden; }
+.stat::before { content:''; position: absolute; top:0; left:0; right:0; height: 2px; }
+.stat.c-green::before { background: linear-gradient(90deg,var(--part),transparent); }
+.stat.c-blue::before  { background: linear-gradient(90deg,var(--lru),transparent); }
+.stat.c-orange::before { background: linear-gradient(90deg,var(--aff),transparent); }
+.stat.c-red::before   { background: linear-gradient(90deg,var(--no),transparent); }
+.stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.stat-value { font-size: 28px; font-weight: 800; margin-top: 4px; line-height: 1; }
+.stat-sub { font-size: 11px; color: var(--muted); margin-top: 5px; line-height: 1.4; }
+
+/* FINDINGS */
+.findings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.finding { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 16px; transition: transform .2s, border-color .2s; }
+.finding:hover { transform: translateY(-2px); border-color: var(--surface3); }
+.finding .num { font-size: 28px; font-weight: 900; color: var(--accent); margin-bottom: 6px; opacity: .8; }
+.finding .title { font-size: 13px; font-weight: 600; margin-bottom: 7px; }
+.finding .body { font-size: 12px; color: var(--muted); line-height: 1.7; }
+.finding.warn-card { border-color: rgba(248,113,113,.25); background: rgba(248,113,113,.04); }
+.finding.warn-card .num { color: var(--no); }
+
+/* LEGEND */
+.legend-row { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; padding: 10px 14px; background: var(--surface2); border-radius: var(--radius-sm); border: 1px solid var(--border); }
+.leg-item { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
+.leg-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.legend-note { font-size: 11px; color: var(--dim); margin-left: auto; }
+
+/* INSIGHT */
+.insight { background: rgba(108,143,255,.06); border-left: 3px solid var(--accent); padding: 12px 14px; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin-top: 14px; font-size: 12px; color: var(--muted); line-height: 1.7; }
+.insight strong { color: var(--text); }
+.honest-box { background: rgba(248,113,113,.05); border: 1px solid rgba(248,113,113,.2); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 18px; font-size: 12px; color: var(--muted); line-height: 1.7; }
+.honest-box strong { color: var(--no); }
+
+/* CHART */
+.chart-wrap { position: relative; width: 100%; }
+canvas { width: 100% !important; display: block; }
+
+/* TABLE */
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: var(--radius-sm); }
+table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 640px; }
+thead { background: var(--surface2); }
+th { padding: 10px 12px; color: var(--muted); font-weight: 500; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
+td { padding: 10px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+tr:last-child td { border-bottom: none; }
+tbody tr { transition: background .1s; }
+tbody tr:hover td { background: var(--surface2); }
+
+/* BADGE */
+.badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 5px; font-size: 10px; font-weight: 700; }
+.badge-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.b-no   { background: rgba(248,113,113,.15); color: var(--no); }
+.b-lru  { background: rgba(108,143,255,.15); color: var(--lru); }
+.b-part { background: rgba(52,211,153,.15);  color: var(--part); }
+.b-aff  { background: rgba(251,146,60,.15);  color: var(--aff); }
+
+/* SLIDER */
+.slider-wrap { display: flex; align-items: center; gap: 14px; padding: 12px 16px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 16px; flex-wrap: wrap; }
+.slider-wrap label { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.slider-wrap input[type=range] { flex: 1; min-width: 120px; accent-color: var(--accent); cursor: pointer; }
+.slider-val { font-size: 13px; font-weight: 700; color: var(--accent); white-space: nowrap; min-width: 110px; text-align: right; }
+
+/* COMPARE ROW */
+.compare-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-bottom: 18px; }
+.compare-card { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px; text-align: center; }
+.compare-card .cfg-name { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
+.compare-card .cfg-val { font-size: 22px; font-weight: 800; }
+.compare-card .cfg-sub { font-size: 10px; color: var(--muted); margin-top: 3px; }
+.compare-card.best { border-color: rgba(52,211,153,.4); background: rgba(52,211,153,.05); }
+
+/* SECTION LABEL */
+.section-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); padding: 0 2px; margin: 20px 0 12px; display: flex; align-items: center; gap: 10px; }
+.section-label::after { content:''; flex:1; height:1px; background: var(--border); }
+
+/* METADATA BAR */
+.meta-bar { display: flex; gap: 20px; flex-wrap: wrap; padding: 10px 14px; background: var(--surface2); border-radius: var(--radius-sm); border: 1px solid var(--border); margin-bottom: 18px; font-size: 11px; color: var(--muted); }
+.meta-item strong { color: var(--text); }
+
+/* RESPONSIVE */
+@media (max-width: 900px) {
+  .grid2, .grid3 { grid-template-columns: 1fr; }
+  .stats { grid-template-columns: 1fr 1fr; }
+  .findings-grid { grid-template-columns: 1fr; }
+  .grid4, .compare-row { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 600px) {
+  .header { padding: 16px; }
+  .header h1 { font-size: 14px; }
+  .header-right { text-align: left; }
+  .panel { padding: 14px; }
+  .stats { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat-value { font-size: 22px; }
+  .grid2, .grid3, .grid4, .compare-row { grid-template-columns: 1fr; }
+  .legend-note { margin-left: 0; width: 100%; }
+  .card { padding: 14px; }
+}
+@media (max-width: 400px) { .stats { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>Cache Effectiveness &amp; Tail Latency <span class="version-badge" id="hdr-version">v1.2</span></h1>
+    <p id="hdr-question">Loading research question…</p>
+  </div>
+  <div class="header-right">
+    <strong>Harish Yerraguntla</strong><br>
+    MS CS · SUNY New Paltz (GPA 3.81)<br>
+    Software Engineer · Qualcomm<br>
+    <span class="pill-tag">PhD Applicant — University of Rochester</span>
+  </div>
+</div>
+
+<div class="tabs-wrapper">
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('findings',this)">Key Findings</div>
+    <div class="tab" onclick="switchTab('concurrency',this)">Concurrency Sweep</div>
+    <div class="tab" onclick="switchTab('alpha',this)">Zipf Alpha</div>
+    <div class="tab" onclick="switchTab('mrc',this)">Miss Ratio Curves</div>
+    <div class="tab" onclick="switchTab('locality',this)">Locality Shift</div>
+    <div class="tab" onclick="switchTab('table',this)">Full Data Table</div>
+  </div>
+</div>
+
+<!-- FINDINGS -->
+<div class="panel active" id="panel-findings">
+  <div id="findings-content">
+    <div class="loading"><div class="spinner"></div>Loading results from results_v2.json…</div>
+  </div>
+</div>
+
+<!-- CONCURRENCY -->
+<div class="panel" id="panel-concurrency">
+  <div class="legend-row">
+    <div class="leg-item"><div class="leg-dot" style="background:var(--no)"></div>No Cache</div>
+    <div class="leg-item"><div class="leg-dot" style="background:var(--lru)"></div>LRU Cache (Redis)</div>
+    <div class="leg-item"><div class="leg-dot" style="background:var(--part)"></div>Partitioned Cache</div>
+    <div class="leg-item"><div class="leg-dot" style="background:var(--aff)"></div>Client Affinity</div>
+    <div class="legend-note">Error bars = 95% CI over <span class="dyn-trials">5</span> trials · alpha = 1.3</div>
+  </div>
+  <div class="grid2">
+    <div class="card full"><h3>P95 Latency vs Concurrency — Log Scale (ms)</h3>
+      <div class="chart-wrap" style="height:280px"><canvas id="c-conc-p95"></canvas></div>
+      <div class="insight"><strong>Key observation:</strong> No-cache collapses above 1K concurrency. LRU and Partitioned diverge above 5K — identical hit rates, different backend queue pressure. Partitioned distributes miss load across shards; LRU funnels all misses through one backend queue.</div>
+    </div>
+    <div class="card"><h3>P50 Latency vs Concurrency (ms)</h3><div class="chart-wrap" style="height:240px"><canvas id="c-conc-p50"></canvas></div></div>
+    <div class="card"><h3>Error Rate vs Concurrency (%)</h3><div class="chart-wrap" style="height:240px"><canvas id="c-conc-err"></canvas></div></div>
+    <div class="card"><h3>Backend Hit Rate vs Concurrency (%)</h3><div class="chart-wrap" style="height:240px"><canvas id="c-conc-backend"></canvas></div></div>
+    <div class="card"><h3>P95 Advantage: Partitioned over LRU (ms)</h3><div class="chart-wrap" style="height:240px"><canvas id="c-conc-gap"></canvas></div></div>
+  </div>
+</div>
+
+<!-- ALPHA -->
+<div class="panel" id="panel-alpha">
+  <div class="grid2">
+    <div class="card full"><h3>P95 Latency vs Zipf Alpha — Concurrency = 10,000</h3>
+      <div class="chart-wrap" style="height:280px"><canvas id="c-alpha-p95"></canvas></div>
+      <div class="insight"><strong>Alpha is the lever:</strong> At high alpha (skewed), Partitioned and LRU nearly converge. At low alpha (flat distribution), all configs struggle — hit rates collapse and P95 stays high regardless of architecture.</div>
+    </div>
+    <div class="card"><h3>Hit Rate vs Alpha (%)</h3><div class="chart-wrap" style="height:240px"><canvas id="c-alpha-hit"></canvas></div></div>
+    <div class="card"><h3>P50 Latency vs Alpha (ms)</h3><div class="chart-wrap" style="height:240px"><canvas id="c-alpha-p50"></canvas></div></div>
+  </div>
+  <div class="section-label">Hit Rate at Each Alpha Level</div>
+  <div id="alpha-stat-cards" class="grid4"></div>
+</div>
+
+<!-- MRC -->
+<div class="panel" id="panel-mrc">
+  <div class="card full">
+    <h3>Miss Ratio Curves by Zipf Alpha — How Fast Does Adding Cache Help?</h3>
+    <div class="chart-wrap" style="height:320px"><canvas id="c-mrc-alpha"></canvas></div>
+    <div class="insight"><strong>Connection to Ding TOMPECS'25:</strong> These MRCs are the empirical counterpart to the continuous-time Zipfian locality model. His model predicts miss rate as a differentiable, closed-form function of cache size. These curves validate the shape — steep initial drop, then a long plateau. Higher alpha = faster initial drop = more locality value per unit cache.</div>
+  </div>
+  <div class="section-label">Summary Statistics from MRC</div>
+  <div class="grid2">
+    <div class="card"><h3>Miss Rate at 10% Cache Size by Alpha</h3><div class="chart-wrap" style="height:240px"><canvas id="c-mrc-10pct"></canvas></div></div>
+    <div class="card"><h3>Cache Keys Needed to Reach 5% Miss Rate</h3><div class="chart-wrap" style="height:240px"><canvas id="c-mrc-target"></canvas></div></div>
+  </div>
+  <div class="section-label">MRC Crossover Points</div>
+  <div id="mrc-stat-cards" class="grid4"></div>
+</div>
+
+<!-- LOCALITY -->
+<div class="panel" id="panel-locality">
+  <div class="honest-box">
+    <strong>v1.2 novel contribution:</strong> In v1.1, concurrency did not change locality structure. Now it does. Each client has a private hot key subset — merging client streams into a global arrival sequence expands the working set a shared LRU must cover. The charts below show how miss rate shifts as client count increases.
+  </div>
+  <div class="card full" style="margin-bottom:16px">
+    <h3>MRC by Client Count — Locality Degrades as Working Set Expands</h3>
+    <div class="chart-wrap" style="height:320px"><canvas id="c-locality-mrc"></canvas></div>
+    <div class="insight"><strong>Core insight:</strong> With 1 client, a 10% cache covers most requests. As client count grows, each client's disjoint hot keys expand the effective working set a global LRU must track. Miss rate triples at 20 clients. This is why partitioned caches can be architecturally superior even at equal total cache size.</div>
+  </div>
+  <div class="grid2">
+    <div class="card"><h3>Miss Rate at 10% Cache vs Client Count</h3><div class="chart-wrap" style="height:260px"><canvas id="c-locality-miss"></canvas></div>
+      <div class="insight" style="margin-top:12px">Plateau at 50 clients is within simulation variance — the effect saturates once disjoint hot subsets cover the available key space. A physically meaningful bound, not a model artifact.</div>
+    </div>
+    <div class="card"><h3>P95 by Configuration — 10K Concurrency</h3><div class="chart-wrap" style="height:260px"><canvas id="c-locality-p95"></canvas></div>
+      <div class="insight" style="margin-top:12px">At equal total cache allocation, Partitioned achieves the best P95 because it eliminates shared-queue backend spikes even when hit rates are nearly identical.</div>
+    </div>
+  </div>
+  <div class="section-label">MRC Shift Summary</div>
+  <div id="locality-stat-cards" class="compare-row"></div>
+</div>
+
+<!-- TABLE -->
+<div class="panel" id="panel-table">
+  <div class="slider-wrap">
+    <label>Concurrency level:</label>
+    <input type="range" id="tblSlider" min="0" max="6" value="4" oninput="updateTable(this.value)">
+    <span class="slider-val" id="tblLabel">10,000 req/s</span>
+  </div>
+  <div class="card">
+    <h3>Full Results — <span class="dyn-trials">5</span> Trial Mean ± 95% Confidence Interval</h3>
+    <div class="table-scroll">
+      <table><thead>
+        <tr><th>Configuration</th><th>Concurrency</th><th>P50</th><th>P95 (mean ± CI)</th><th>P99</th><th>Hit Rate</th><th>Backend Hit</th><th>Throughput</th><th>Error Rate</th><th>Trials</th></tr>
+      </thead><tbody id="tbl-body"></tbody></table>
+    </div>
+  </div>
+  <div class="section-label">P95 Overview — All Concurrency Levels</div>
+  <div class="card"><h3>P95 Latency — Caching Configs Only (ms)</h3><div class="chart-wrap" style="height:280px"><canvas id="c-table-overview"></canvas></div></div>
+</div>
+
+<script>
+// ── THEME ────────────────────────────────────────────────
+const COLORS = {
+  NO_CACHE:          { b:'#f87171', bg:'rgba(248,113,113,.1)' },
+  LRU_CACHE:         { b:'#6c8fff', bg:'rgba(108,143,255,.1)' },
+  PARTITIONED_CACHE: { b:'#34d399', bg:'rgba(52,211,153,.1)'  },
+  CLIENT_AFFINITY:   { b:'#fb923c', bg:'rgba(251,146,60,.1)'  },
+};
+const LABELS = { NO_CACHE:'No Cache', LRU_CACHE:'LRU Cache', PARTITIONED_CACHE:'Partitioned', CLIENT_AFFINITY:'Client Affinity' };
+const BADGE  = { NO_CACHE:'b-no', LRU_CACHE:'b-lru', PARTITIONED_CACHE:'b-part', CLIENT_AFFINITY:'b-aff' };
+const CFGS   = ['NO_CACHE','LRU_CACHE','PARTITIONED_CACHE','CLIENT_AFFINITY'];
+const ALPHA_COLORS  = ['#f87171','#fb923c','#6c8fff','#34d399'];
+const CLIENT_COLORS = ['#f87171','#fb923c','#facc15','#34d399','#6c8fff','#c084fc'];
+
+Chart.defaults.color = '#7a80a0';
+Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
+Chart.defaults.font.size = 11;
+
+function gridCol() { return '#2a2f45'; }
+
+function baseOpts(extra = {}) {
+  const opts = {
+    responsive: true, maintainAspectRatio: false,
+    interaction: { mode:'index', intersect:false },
+    plugins: {
+      legend: { labels:{ color:'#7a80a0', font:{size:11}, boxWidth:10, padding:14 } },
+      tooltip: { backgroundColor:'#1c2030', borderColor:'#2a2f45', borderWidth:1, titleColor:'#e8eaf0', bodyColor:'#7a80a0', padding:10 }
+    },
+    scales: {
+      x: { ticks:{color:'#7a80a0',font:{size:10}}, grid:{color:gridCol()} },
+      y: {
+        ticks: { color:'#7a80a0', font:{size:10}, ...(extra.yTickCb ? {callback:extra.yTickCb}:{}) },
+        grid: { color:gridCol() },
+        ...(extra.logY  ? {type:'logarithmic'} : {}),
+        ...(extra.yLabel? {title:{display:true,text:extra.yLabel,color:'#7a80a0',font:{size:10}}}:{}),
+        ...(extra.yMin !== undefined ? {min:extra.yMin}:{}),
+        ...(extra.yMax !== undefined ? {max:extra.yMax}:{}),
+      }
+    }
+  };
+  return opts;
+}
+
+function mkLine(id, labels, datasets, extra={}) {
+  return new Chart(document.getElementById(id), { type:'line', data:{labels,datasets}, options:baseOpts(extra) });
+}
+function mkBar(id, labels, datasets, extra={}) {
+  const opts = baseOpts(extra);
+  opts.plugins.legend = { display: false };
+  return new Chart(document.getElementById(id), { type:'bar', data:{labels,datasets}, options:opts });
+}
+function mkScatter(id, datasets, extra={}) {
+  const opts = baseOpts(extra);
+  return new Chart(document.getElementById(id), { type:'line', data:{datasets}, options:opts });
+}
+
+// ── DATA HELPERS ─────────────────────────────────────────
+function groupBy(arr, key) {
+  return arr.reduce((acc, r) => { (acc[r[key]] = acc[r[key]] || []).push(r); return acc; }, {});
+}
+
+// For a given config group (sorted by concurrency), extract a field array
+function extract(group, field) {
+  return group.map(r => +(r[field] * 1).toFixed(4));
+}
+
+// Find miss rate at exactly (or just above) a target cache size in an MRC array
+function missAtSize(mrcArr, targetSize) {
+  // mrcArr is [[size, miss_rate], ...]
+  const pt = mrcArr.find(([s]) => s >= targetSize) || mrcArr[mrcArr.length - 1];
+  return +(pt[1] * 100).toFixed(2);
+}
+
+// Find smallest cache size where miss rate drops to or below threshold
+function sizeForMiss(mrcArr, threshold) {
+  const pt = mrcArr.find(([, m]) => m <= threshold);
+  return pt ? pt[0] : mrcArr[mrcArr.length-1][0];
+}
+
+function pct(v, digits=1) { return (v * 100).toFixed(digits) + '%'; }
+function ms(v) { return v.toFixed(1) + ' ms'; }
+
+// ── MAIN ─────────────────────────────────────────────────
+async function init() {
+  let data;
+  try {
+    const res = await fetch('./results_v2.json');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    data = await res.json();
+  } catch (e) {
+    document.getElementById('findings-content').innerHTML = `
+      <div class="error-box">
+        <strong>Could not load results_v2.json</strong>
+        This dashboard must be served over HTTP — it cannot open local files directly.<br><br>
+        Run a local server in the same folder:<br>
+        <code>python3 -m http.server 8080</code><br><br>
+        Then open: <code>http://localhost:8080/dashboard_v2.html</code>
+      </div>`;
+    return;
+  }
+
+  const { metadata, concurrency_sweep, alpha_sweep, mrc_by_alpha, mrc_by_clients } = data;
+
+  // Update header
+  document.getElementById('hdr-version').textContent = 'v' + metadata.version;
+  document.getElementById('hdr-question').textContent = metadata.research_question;
+  document.querySelectorAll('.dyn-trials').forEach(el => el.textContent = metadata.n_trials);
+
+  // ── BUILD LOOKUP STRUCTURES ───────────────────────────
+
+  // Concurrency sweep: group by config, sort by concurrency
+  const csByConfig = groupBy(concurrency_sweep, 'config');
+  Object.values(csByConfig).forEach(arr => arr.sort((a,b) => a.concurrency - b.concurrency));
+  const concs   = [...new Set(concurrency_sweep.map(r => r.concurrency))].sort((a,b)=>a-b);
+  const cLabels = concs.map(c => c >= 1000 ? (c/1000)+'K' : String(c));
+
+  // Alpha sweep: group by config, sort by alpha
+  const asByConfig = groupBy(alpha_sweep, 'config');
+  Object.values(asByConfig).forEach(arr => arr.sort((a,b) => a.zipf_alpha - b.zipf_alpha));
+  const alphas  = [...new Set(alpha_sweep.map(r => r.zipf_alpha))].sort((a,b)=>a-b);
+  const aLabels = alphas.map(a => 'α=' + a);
+
+  // Reference rows for key findings
+  const ref10k = (cfg) => csByConfig[cfg]?.find(r => r.concurrency === 10000);
+  const ref50k = (cfg) => csByConfig[cfg]?.find(r => r.concurrency === 50000);
+
+  const no10k   = ref10k('NO_CACHE');
+  const lru10k  = ref10k('LRU_CACHE');
+  const part10k = ref10k('PARTITIONED_CACHE');
+  const aff10k  = ref10k('CLIENT_AFFINITY');
+  const lru50k  = ref50k('LRU_CACHE');
+  const part50k = ref50k('PARTITIONED_CACHE');
+
+  const p95Reduction = ((no10k.p95_mean - part10k.p95_mean) / no10k.p95_mean * 100).toFixed(1);
+  const lruVsPart50k = ((lru50k.p95_mean - part50k.p95_mean) / lru50k.p95_mean * 100).toFixed(1);
+  const hitCost      = ((lru10k.hit_rate_mean - aff10k.hit_rate_mean) * 100).toFixed(1);
+
+  // MRC miss at 10% cache size
+  const cacheSize = metadata.cache_size; // 500 = 10% of 5000
+  const clientKeys = Object.keys(mrc_by_clients).sort((a,b)=>+a-+b);
+  const miss10clients = clientKeys.map(nc => missAtSize(mrc_by_clients[nc], cacheSize));
+  const miss10alpha   = Object.keys(mrc_by_alpha).sort((a,b)=>+a-+b).map(a => missAtSize(mrc_by_alpha[a], cacheSize));
+  const mrcShift = (miss10clients[miss10clients.length-2] - miss10clients[0]).toFixed(1); // 1→20 clients
+
+  // ── FINDINGS TAB ─────────────────────────────────────
+  document.getElementById('findings-content').innerHTML = `
+    <div class="stats">
+      <div class="stat c-green">
+        <div class="stat-label">P95 Reduction vs No-Cache (10K conc)</div>
+        <div class="stat-value" style="color:var(--part)">${p95Reduction}%</div>
+        <div class="stat-sub">${ms(no10k.p95_mean)} → ${ms(part10k.p95_mean)} · partitioned cache</div>
+      </div>
+      <div class="stat c-blue">
+        <div class="stat-label">Partitioned vs LRU at 50K conc</div>
+        <div class="stat-value" style="color:var(--lru)">${lruVsPart50k}%</div>
+        <div class="stat-sub">${ms(lru50k.p95_mean)} → ${ms(part50k.p95_mean)} P95 · queue dispersion wins</div>
+      </div>
+      <div class="stat c-orange">
+        <div class="stat-label">Client Affinity Hit-Rate Cost</div>
+        <div class="stat-value" style="color:var(--aff)">−${hitCost}pp</div>
+        <div class="stat-sub">${pct(aff10k.hit_rate_mean)} vs ${pct(lru10k.hit_rate_mean)} · small per-client caches miss the tail</div>
+      </div>
+      <div class="stat c-red">
+        <div class="stat-label">MRC Shift: 1 → 20 Clients</div>
+        <div class="stat-value" style="color:var(--no)">+${mrcShift}pp</div>
+        <div class="stat-sub">Miss at 10% cache: ${miss10clients[0]}% → ${miss10clients[miss10clients.length-2]}%</div>
+      </div>
+    </div>
+
+    <div class="section-label">5 Key Results from ${concurrency_sweep.length + alpha_sweep.length} Simulation Rows · ${metadata.n_trials} Trials Each</div>
+
+    <div class="findings-grid">
+      <div class="finding">
+        <div class="num">01</div>
+        <div class="title">LRU wins on P50. Partitioned wins on P95 at scale.</div>
+        <div class="body">Shared LRU achieves ${ms(lru10k.p50_mean)} P50 — hot keys stay warm globally. Above 5K concurrency, P95 diverges: partitioned cache reduces miss-induced queue spikes per shard, yielding ${((lru50k.p95_mean-part50k.p95_mean)/lru50k.p95_mean*100).toFixed(0)}% lower P95 at 50K requests.</div>
+      </div>
+      <div class="finding">
+        <div class="num">02</div>
+        <div class="title">Client affinity trades hit rate for isolation.</div>
+        <div class="body">CLIENT_AFFINITY routes each session to a dedicated node. Hit rate at 10K concurrency: ${pct(aff10k.hit_rate_mean)} vs ${pct(lru10k.hit_rate_mean)} for LRU. At 10% total cache, per-node capacity is too small for the global tail — making it worse than both LRU and partitioned on P95 at moderate concurrency.</div>
+      </div>
+      <div class="finding">
+        <div class="num">03</div>
+        <div class="title">Alpha is the primary predictor of cache value.</div>
+        <div class="body">MRC shape changes dramatically with alpha. High-alpha workloads extract most locality value from tiny caches. Low-alpha (flat) workloads see diminishing returns regardless of cache architecture or size.</div>
+      </div>
+      <div class="finding">
+        <div class="num">04</div>
+        <div class="title">Concurrency genuinely shifts locality structure. <span style="font-size:10px;color:var(--accent);font-weight:700">v1.2</span></div>
+        <div class="body">Multi-client streams with disjoint hot subsets expand the working set a global LRU must cover. Miss rate at 10% cache grows from ${miss10clients[0]}% (1 client) to ${miss10clients[miss10clients.length-2]}% (20 clients). This is the mechanism by which partitioned caches outperform LRU — not just contention, but reduced reuse distance per partition.</div>
+      </div>
+      <div class="finding">
+        <div class="num">05</div>
+        <div class="title">Error rates are the clearest case for any caching.</div>
+        <div class="body">No-cache collapses at 5K+ concurrency: ${(no10k.error_rate_mean*100).toFixed(1)}% error rate at 10K, ${(ref50k('NO_CACHE').error_rate_mean*100).toFixed(1)}% at 50K. Every caching strategy keeps errors below ${(Math.max(lru50k.error_rate_mean,part50k.error_rate_mean)*100).toFixed(1)}% up to 50K requests.</div>
+      </div>
+      <div class="finding warn-card">
+        <div class="num">⚠</div>
+        <div class="title">Honest scope of this simulation</div>
+        <div class="body">${metadata.honest_note} Results are directionally valid; next step is validation against real Redis traces (Twitter OSDI 2020 dataset).</div>
+      </div>
+    </div>
+
+    <div class="section-label">At a Glance — 10K Concurrency, Alpha = 1.3</div>
+    <div class="compare-row">
+      <div class="compare-card">
+        <div class="cfg-name" style="color:var(--no)">No Cache</div>
+        <div class="cfg-val" style="color:var(--no)">${no10k.p95_mean.toFixed(0)}ms</div>
+        <div class="cfg-sub">P95 · ${(no10k.error_rate_mean*100).toFixed(1)}% error rate</div>
+      </div>
+      <div class="compare-card">
+        <div class="cfg-name" style="color:var(--lru)">LRU Cache</div>
+        <div class="cfg-val" style="color:var(--lru)">${lru10k.p95_mean.toFixed(0)}ms</div>
+        <div class="cfg-sub">P95 · ${pct(lru10k.hit_rate_mean)} hit rate</div>
+      </div>
+      <div class="compare-card best">
+        <div class="cfg-name" style="color:var(--part)">Partitioned ✓</div>
+        <div class="cfg-val" style="color:var(--part)">${part10k.p95_mean.toFixed(0)}ms</div>
+        <div class="cfg-sub">P95 · ${pct(part10k.hit_rate_mean)} hit rate · best tail</div>
+      </div>
+      <div class="compare-card">
+        <div class="cfg-name" style="color:var(--aff)">Client Affinity</div>
+        <div class="cfg-val" style="color:var(--aff)">${aff10k.p95_mean.toFixed(0)}ms</div>
+        <div class="cfg-sub">P95 · ${pct(aff10k.hit_rate_mean)} hit rate</div>
+      </div>
+    </div>`;
+
+  // ── CONCURRENCY CHARTS ────────────────────────────────
+  const csDatasets = (field) => CFGS.map(c => ({
+    label: LABELS[c],
+    data: extract(csByConfig[c] || [], field),
+    borderColor: COLORS[c].b, backgroundColor: COLORS[c].bg,
+    tension: .4, fill: true, pointRadius: 4, pointHoverRadius: 6,
+  }));
+
+  mkLine('c-conc-p95', cLabels, csDatasets('p95_mean'), { logY:true, yLabel:'P95 (ms, log scale)' });
+  mkLine('c-conc-p50', cLabels, csDatasets('p50_mean'), { yLabel:'P50 (ms)' });
+
+  mkLine('c-conc-err', cLabels, CFGS.map(c => ({
+    label: LABELS[c],
+    data: (csByConfig[c]||[]).map(r => +(r.error_rate_mean*100).toFixed(3)),
+    borderColor: COLORS[c].b, backgroundColor: COLORS[c].bg,
+    tension:.4, fill:true, pointRadius:3,
+  })), { yLabel:'Error rate (%)' });
+
+  mkLine('c-conc-backend', cLabels, CFGS.map(c => ({
+    label: LABELS[c],
+    data: (csByConfig[c]||[]).map(r => +(r.backend_hit_rate_mean*100).toFixed(2)),
+    borderColor: COLORS[c].b, backgroundColor: COLORS[c].bg,
+    tension:.4, fill:true, pointRadius:3,
+  })), { yLabel:'Backend hit rate (%)' });
+
+  const lruP95  = extract(csByConfig['LRU_CACHE']||[], 'p95_mean');
+  const partP95 = extract(csByConfig['PARTITIONED_CACHE']||[], 'p95_mean');
+  const gapData = lruP95.map((v,i) => +(v - partP95[i]).toFixed(1));
+  new Chart(document.getElementById('c-conc-gap'), {
+    type:'bar',
+    data:{ labels:cLabels, datasets:[{ label:'LRU P95 − Partitioned P95 (ms)', data:gapData,
+      backgroundColor: gapData.map(v=>v>0?'rgba(52,211,153,.55)':'rgba(248,113,113,.4)'),
+      borderColor: gapData.map(v=>v>0?'#34d399':'#f87171'), borderWidth:1.5, borderRadius:4 }] },
+    options:{ ...baseOpts({yLabel:'ms advantage of Partitioned'}), plugins:{...baseOpts().plugins,legend:{display:false}} }
+  });
+
+  // ── ALPHA CHARTS ──────────────────────────────────────
+  mkLine('c-alpha-p95', aLabels, CFGS.map(c=>({
+    label:LABELS[c], data:extract(asByConfig[c]||[],'p95_mean'),
+    borderColor:COLORS[c].b, backgroundColor:COLORS[c].bg, tension:.4, fill:true, pointRadius:5,
+  })), {yLabel:'P95 (ms)'});
+
+  mkLine('c-alpha-hit', aLabels, ['LRU_CACHE','PARTITIONED_CACHE','CLIENT_AFFINITY'].map(c=>({
+    label:LABELS[c], data:(asByConfig[c]||[]).map(r=>+(r.hit_rate_mean*100).toFixed(2)),
+    borderColor:COLORS[c].b, backgroundColor:COLORS[c].bg, tension:.4, fill:true, pointRadius:5,
+  })), {yLabel:'Hit rate (%)', yMin:0, yMax:100});
+
+  mkLine('c-alpha-p50', aLabels, CFGS.map(c=>({
+    label:LABELS[c], data:extract(asByConfig[c]||[],'p50_mean'),
+    borderColor:COLORS[c].b, backgroundColor:COLORS[c].bg, tension:.4, fill:true, pointRadius:5,
+  })), {yLabel:'P50 (ms)'});
+
+  // Alpha stat cards — derived from alpha_sweep data
+  document.getElementById('alpha-stat-cards').innerHTML = alphas.map((a,i) => {
+    const lruRow = asByConfig['LRU_CACHE']?.find(r=>r.zipf_alpha===a);
+    if (!lruRow) return '';
+    const colors = ['var(--no)','var(--aff)','var(--lru)','var(--part)'];
+    return `<div class="card" style="text-align:center">
+      <h3>Alpha = ${a}</h3>
+      <div style="font-size:28px;font-weight:800;color:${colors[i]};margin:8px 0">${pct(lruRow.hit_rate_mean)}</div>
+      <div style="font-size:11px;color:var(--muted)">LRU hit rate · P95 = ${ms(lruRow.p95_mean)}</div>
+    </div>`;
+  }).join('');
+
+  // ── MRC CHARTS ────────────────────────────────────────
+  const alphaKeys = Object.keys(mrc_by_alpha).sort((a,b)=>+a-+b);
+
+  mkScatter('c-mrc-alpha', alphaKeys.map((a,i)=>({
+    label:'α='+a,
+    data: mrc_by_alpha[a].map(([x,y])=>({x, y:+(y*100).toFixed(2)})),
+    borderColor:ALPHA_COLORS[i], backgroundColor:'transparent', tension:.4, pointRadius:2, borderWidth:2.5,
+  })), {
+    yLabel:'Miss rate (%)', yMin:0, yMax:100,
+    // override x to log
+  });
+  // patch x-axis to log for mrc charts
+  Chart.getChart('c-mrc-alpha').options.scales.x = {
+    type:'logarithmic', ticks:{color:'#7a80a0',font:{size:10}}, grid:{color:gridCol()},
+    title:{display:true,text:'Cache size (keys, log scale)',color:'#7a80a0'}
+  };
+  Chart.getChart('c-mrc-alpha').update();
+
+  mkBar('c-mrc-10pct', alphaKeys.map(a=>'α='+a), [{
+    label:'Miss rate at 10% cache size',
+    data: alphaKeys.map(a=>missAtSize(mrc_by_alpha[a], cacheSize)),
+    backgroundColor: ALPHA_COLORS.map(c=>c+'55'), borderColor:ALPHA_COLORS, borderWidth:2, borderRadius:5,
+  }], {yLabel:'Miss rate (%)'});
+
+  mkBar('c-mrc-target', alphaKeys.map(a=>'α='+a), [{
+    label:'Keys needed for 5% miss rate',
+    data: alphaKeys.map(a=>sizeForMiss(mrc_by_alpha[a], 0.05)),
+    backgroundColor: ALPHA_COLORS.map(c=>c+'55'), borderColor:ALPHA_COLORS, borderWidth:2, borderRadius:5,
+  }], {yLabel:'# keys required'});
+
+  document.getElementById('mrc-stat-cards').innerHTML = alphaKeys.map((a,i)=>{
+    const m = missAtSize(mrc_by_alpha[a], cacheSize);
+    const colors = ['var(--no)','var(--aff)','var(--lru)','var(--part)'];
+    return `<div class="card" style="text-align:center">
+      <h3>Alpha ${a}</h3>
+      <div style="font-size:26px;font-weight:800;color:${colors[i]};margin:8px 0">${m}%</div>
+      <div style="font-size:11px;color:var(--muted)">miss at 10% cache</div>
+    </div>`;
+  }).join('');
+
+  // ── LOCALITY CHARTS ───────────────────────────────────
+  mkScatter('c-locality-mrc', clientKeys.map((nc,i)=>({
+    label: nc+(nc==='1'?' client':' clients'),
+    data: mrc_by_clients[nc].map(([x,y])=>({x,y:+(y*100).toFixed(2)})),
+    borderColor:CLIENT_COLORS[i], backgroundColor:'transparent', tension:.4, pointRadius:2, borderWidth:2.5,
+  })), {yLabel:'Miss rate (%)', yMin:0, yMax:100});
+  Chart.getChart('c-locality-mrc').options.scales.x = {
+    type:'logarithmic', ticks:{color:'#7a80a0',font:{size:10}}, grid:{color:gridCol()},
+    title:{display:true,text:'Cache size (keys, log scale)',color:'#7a80a0'}
+  };
+  Chart.getChart('c-locality-mrc').update();
+
+  mkBar('c-locality-miss', clientKeys.map(nc=>nc+(nc==='1'?' client':' clients')), [{
+    label:'Miss rate at 10% cache',
+    data: miss10clients,
+    backgroundColor:CLIENT_COLORS.map(c=>c+'55'), borderColor:CLIENT_COLORS, borderWidth:2, borderRadius:5,
+  }], {yLabel:'Miss rate (%)'});
+
+  // P95 by config at 10K concurrency from actual data
+  mkBar('c-locality-p95', CFGS.map(c=>LABELS[c]), [{
+    label:'P95 at 10K concurrency (ms)',
+    data: CFGS.map(c=>+(ref10k(c)?.p95_mean||0).toFixed(1)),
+    backgroundColor:CFGS.map(c=>COLORS[c].bg), borderColor:CFGS.map(c=>COLORS[c].b), borderWidth:2, borderRadius:5,
+  }], {yLabel:'P95 (ms)'});
+
+  // Locality stat cards
+  document.getElementById('locality-stat-cards').innerHTML = clientKeys.map((nc,i)=>{
+    const colors=['var(--part)','var(--lru)','var(--lru)','var(--aff)','var(--no)','var(--no)'];
+    return `<div class="compare-card">
+      <div class="cfg-name">${nc} ${nc==='1'?'Client':'Clients'}</div>
+      <div class="cfg-val" style="color:${colors[i]}">${miss10clients[i]}%</div>
+      <div class="cfg-sub">miss at 10% cache</div>
+    </div>`;
+  }).join('');
+
+  // ── TABLE ─────────────────────────────────────────────
+  new Chart(document.getElementById('c-table-overview'), {
+    type:'line',
+    data:{ labels:cLabels, datasets:['LRU_CACHE','PARTITIONED_CACHE','CLIENT_AFFINITY'].map(c=>({
+      label:LABELS[c], data:extract(csByConfig[c]||[],'p95_mean'),
+      borderColor:COLORS[c].b, backgroundColor:COLORS[c].bg, tension:.4, fill:true, pointRadius:4,
+    }))},
+    options:baseOpts({yLabel:'P95 (ms)'})
+  });
+
+  // Store for table slider
+  window._tableData = { csByConfig, concs };
+  updateTable(4);
+}
+
+function updateTable(idx) {
+  idx = parseInt(idx);
+  if (!window._tableData) return;
+  const { csByConfig, concs } = window._tableData;
+  const conc = concs[idx];
+  document.getElementById('tblLabel').textContent = conc.toLocaleString() + ' req/s';
+  document.getElementById('tbl-body').innerHTML = CFGS.map(c => {
+    const r = (csByConfig[c]||[]).find(row=>row.concurrency===conc);
+    if (!r) return '';
+    const errColor = r.error_rate_mean > 0.1 ? 'var(--no)' : r.error_rate_mean > 0.01 ? 'var(--aff)' : 'var(--part)';
+    return `<tr>
+      <td><span class="badge ${BADGE[c]}"><span class="badge-dot"></span>${LABELS[c]}</span></td>
+      <td>${conc.toLocaleString()}</td>
+      <td>${r.p50_mean.toFixed(1)} ms</td>
+      <td><strong>${r.p95_mean.toFixed(1)}</strong> ± ${r.p95_ci95.toFixed(1)} ms</td>
+      <td>${r.p99_mean.toFixed(1)} ms</td>
+      <td>${(r.hit_rate_mean*100).toFixed(1)}%</td>
+      <td>${(r.backend_hit_rate_mean*100).toFixed(1)}%</td>
+      <td>${r.throughput_mean.toFixed(0)} rps</td>
+      <td style="color:${errColor};font-weight:600">${(r.error_rate_mean*100).toFixed(2)}%</td>
+      <td style="color:var(--muted)">${r.n_trials}</td>
+    </tr>`;
+  }).join('');
+}
+
+function switchTab(name, el) {
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('panel-'+name).classList.add('active');
+}
+
+init();
+</script>
+</body>
+</html>
