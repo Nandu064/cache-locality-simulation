@@ -195,13 +195,12 @@ def run_single(
     rng = np.random.default_rng(seed)
     queue_pressure = concurrency * 0.15  # scales backend wait with load
 
-    if config == "CLIENT_AFFINITY":
-        requests, client_ids = multi_client_stream(
-            n_requests, n_keys, zipf_alpha, n_clients, hot_fraction, seed
-        )
-    else:
-        requests = single_stream(n_requests, n_keys, zipf_alpha, seed)
-        client_ids = np.zeros(n_requests, dtype=int)
+    # All configs receive the same multi-client merged stream for a fair comparison.
+    # NO_CACHE and LRU_CACHE ignore client_ids; PARTITIONED_CACHE uses key sharding;
+    # CLIENT_AFFINITY uses client_ids for routing.
+    requests, client_ids = multi_client_stream(
+        n_requests, n_keys, zipf_alpha, n_clients, hot_fraction, seed
+    )
 
     latencies = []
     errors = 0
