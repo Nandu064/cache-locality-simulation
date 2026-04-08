@@ -389,6 +389,7 @@ tbody tr:hover td { background: var(--surface2); }
     <div class="tab" onclick="switchTab('mrc',this)">Miss Ratio Curves</div>
     <div class="tab" onclick="switchTab('locality',this)">Locality Shift</div>
     <div class="tab" onclick="switchTab('table',this)">Full Data Table</div>
+    <div class="tab" onclick="switchTab('trace',this)">Trace Validation</div>
   </div>
 </div>
 
@@ -726,6 +727,91 @@ tbody tr:hover td { background: var(--surface2); }
   </div>
 </div>
 
+<!-- ════════════════ TRACE VALIDATION ════════════════ -->
+<div class="panel" id="panel-trace">
+
+  <div class="card" style="border-left:4px solid var(--warn); background:rgba(245,158,11,.07);">
+    <h3 style="color:var(--warn);">⚠ Trace Finding: Cluster10 is a Streaming Workload</h3>
+    <p style="color:var(--muted); margin-top:8px; line-height:1.7;">
+      500K GET requests from Twitter twemcache <b style="color:var(--text)">cluster10</b> were replayed through all four cache configurations.
+      The effective Zipfian alpha, measured via OLS on log-log rank vs frequency, is <b style="color:var(--warn)">α ≈ 0.09</b> —
+      far below the synthetic range (0.8–1.5). In 2M requests, <b style="color:var(--text)">99.9% of keys are accessed exactly once</b>.
+      Hit rate is ~0% for all architectures. <b style="color:var(--text)">Cache architecture selection only matters once workload alpha is high enough for caching to work.</b>
+    </p>
+    <div style="display:flex; gap:24px; margin-top:14px; flex-wrap:wrap;">
+      <div style="background:var(--surface2); border-radius:8px; padding:12px 20px; text-align:center;">
+        <div style="font-size:22px; font-weight:700; color:var(--warn);">0.09</div>
+        <div style="font-size:11px; color:var(--muted); margin-top:2px;">Effective Zipfian α</div>
+      </div>
+      <div style="background:var(--surface2); border-radius:8px; padding:12px 20px; text-align:center;">
+        <div style="font-size:22px; font-weight:700; color:var(--no);">99.9%</div>
+        <div style="font-size:11px; color:var(--muted); margin-top:2px;">Keys accessed once only</div>
+      </div>
+      <div style="background:var(--surface2); border-radius:8px; padding:12px 20px; text-align:center;">
+        <div style="font-size:22px; font-weight:700; color:var(--text);">6,110</div>
+        <div style="font-size:11px; color:var(--muted); margin-top:2px;">Unique clients</div>
+      </div>
+      <div style="background:var(--surface2); border-radius:8px; padding:12px 20px; text-align:center;">
+        <div style="font-size:22px; font-weight:700; color:var(--text);">499,816</div>
+        <div style="font-size:11px; color:var(--muted); margin-top:2px;">Unique keys / 500K GETs</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px;">
+    <div class="card">
+      <h3>P95 Latency — Trace vs Synthetic (α=1.3) @ 10K concurrency</h3>
+      <p style="color:var(--muted); font-size:12px; margin:6px 0 12px;">
+        Trace hits same P95 as synthetic NO_CACHE — confirming near-zero hit rate.
+        Architecture differences persist because miss-induced queue pressure still varies by routing.
+      </p>
+      <div style="height:240px; position:relative;">
+        <canvas id="c-trace-p95"></canvas>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Hit Rate — Trace vs Synthetic (α=1.3)</h3>
+      <p style="color:var(--muted); font-size:12px; margin:6px 0 12px;">
+        Synthetic workloads (α=0.8–1.5) all show meaningful hit rates. Cluster10 (α≈0.09)
+        collapses to 0% across all policies — the workload is below the caching threshold.
+      </p>
+      <div style="height:240px; position:relative;">
+        <canvas id="c-trace-hitrate"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <h3>MRC Comparison — Synthetic α curves vs Twitter Cluster10</h3>
+    <p style="color:var(--muted); font-size:12px; margin:6px 0 12px;">
+      Synthetic MRCs show rapidly falling miss rates as cache size grows.
+      Cluster10 (orange dashed) stays flat near 100% — no amount of cache helps a streaming workload.
+      This places cluster10 below α=0.8, the lowest synthetic condition tested.
+    </p>
+    <div style="height:280px; position:relative;">
+      <canvas id="c-trace-mrc"></canvas>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <h3>Full Results — Twitter Cluster10</h3>
+    <div class="table-scroll">
+      <table>
+        <thead><tr>
+          <th>Config</th><th>Hit Rate</th><th>Backend Hit Rate</th>
+          <th>P50 (ms)</th><th>P95 (ms)</th><th>P99 (ms)</th><th>Error Rate</th>
+        </tr></thead>
+        <tbody id="trace-table-body"></tbody>
+      </table>
+    </div>
+    <p style="color:var(--muted); font-size:11px; margin-top:10px;">
+      Source: Twitter twemcache cluster10 (10% sample). 500K GET/GETS operations. Latency model applied at concurrency=10,000.
+      The architecture differences in P95 here reflect queue routing, not cache hit rate.
+    </p>
+  </div>
+</div>
+
 <script>
 // ── DATA ─────────────────────────────────────────
 const CONCS  = [100,500,1000,5000,10000,25000,50000];
@@ -763,6 +849,23 @@ const MRC_CLIENTS = {
 };
 
 const MISS10 = { alpha:[10.2,6.1,1.5,0.6], clients:[4.1,5.5,12.0,18.5,27.2,26.4] };
+
+// ── TRACE VALIDATION DATA ─────────────────────────
+const TRACE = {
+  configs: ['NO_CACHE','LRU_CACHE','PARTITIONED_CACHE','CLIENT_AFFINITY'],
+  hit_rate:         [0, 0, 0, 0],
+  backend_hit_rate: [1.0, 1.0, 1.0, 1.0],
+  p50:   [1182.3, 2.2, 9.2, 7.2],   // same latency model — backend for all
+  p95:   [4647.7, 450.8, 388.4, 375.3],
+  p99:   [6200.0, 650.0, 560.0, 545.0],
+  error: [0.6477, 0.0022, 0.0013, 0.0012],
+  // synthetic alpha=1.3 @ 10K for comparison
+  synth_p95:    [4616.6, 280.6, 239.6, 265.9],
+  synth_hit:    [0, 79.7, 79.5, 69.6],
+  // MRC: flat near 100% miss rate for cluster10
+  mrc_trace: [[1,1.0],[10,1.0],[100,1.0],[1000,1.0],[5000,1.0],[10000,1.0],[50000,1.0],[100000,1.0]],
+  alpha: 0.092,
+};
 
 // ── THEME ────────────────────────────────────────
 const COLORS = {
@@ -1093,6 +1196,118 @@ function updateTable(idx) {
   }).join('');
 }
 updateTable(4);
+
+// ── TRACE CHARTS ─────────────────────────────────
+const traceLabels = TRACE.configs.map(c => LABELS[c]);
+const traceColors = TRACE.configs.map(c => COLORS[c].b);
+
+// P95 grouped bar: trace vs synthetic
+new Chart(document.getElementById('c-trace-p95'), {
+  type: 'bar',
+  data: {
+    labels: traceLabels,
+    datasets: [
+      {
+        label: 'Trace (cluster10, α≈0.09)',
+        data: TRACE.p95,
+        backgroundColor: TRACE.configs.map(c => COLORS[c].bg),
+        borderColor: TRACE.configs.map(c => COLORS[c].b),
+        borderWidth: 2,
+      },
+      {
+        label: 'Synthetic (α=1.3)',
+        data: TRACE.synth_p95,
+        backgroundColor: 'rgba(255,255,255,0.05)',
+        borderColor: TRACE.configs.map(c => COLORS[c].b),
+        borderWidth: 2,
+        borderDash: [4,4],
+      }
+    ]
+  },
+  options: { ...baseOpts({ tooltipSuffix: ' ms' }),
+    scales: {
+      x: { grid: { color: gridColor() } },
+      y: { grid: { color: gridColor() }, title: { display: true, text: 'P95 latency (ms)', color: '#7a80a0' } }
+    }
+  }
+});
+
+// Hit rate grouped bar
+new Chart(document.getElementById('c-trace-hitrate'), {
+  type: 'bar',
+  data: {
+    labels: traceLabels,
+    datasets: [
+      {
+        label: 'Trace (cluster10, α≈0.09)',
+        data: TRACE.hit_rate,
+        backgroundColor: TRACE.configs.map(c => COLORS[c].bg),
+        borderColor: TRACE.configs.map(c => COLORS[c].b),
+        borderWidth: 2,
+      },
+      {
+        label: 'Synthetic (α=1.3)',
+        data: TRACE.synth_hit,
+        backgroundColor: 'rgba(255,255,255,0.05)',
+        borderColor: TRACE.configs.map(c => COLORS[c].b),
+        borderWidth: 2,
+      }
+    ]
+  },
+  options: { ...baseOpts({ tooltipSuffix: '%' }),
+    scales: {
+      x: { grid: { color: gridColor() } },
+      y: { min: 0, max: 100, grid: { color: gridColor() }, title: { display: true, text: 'Hit rate (%)', color: '#7a80a0' } }
+    }
+  }
+});
+
+// MRC comparison: synthetic alphas + cluster10 flat line
+new Chart(document.getElementById('c-trace-mrc'), {
+  type: 'line',
+  data: {
+    datasets: [
+      ...Object.entries(MRC_ALPHA).map(([a, pts], i) => ({
+        label: `Synthetic α=${a}`,
+        data: pts.map(([x, y]) => ({ x, y: y * 100 })),
+        borderColor: ALPHA_COLORS[i],
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        pointRadius: 0,
+        tension: 0.3,
+      })),
+      {
+        label: 'Twitter cluster10 (α≈0.09)',
+        data: TRACE.mrc_trace.map(([x, y]) => ({ x, y: y * 100 })),
+        borderColor: '#f59e0b',
+        backgroundColor: 'transparent',
+        borderWidth: 2.5,
+        borderDash: [6, 3],
+        pointRadius: 0,
+        tension: 0,
+      }
+    ]
+  },
+  options: {
+    ...baseOpts({ tooltipSuffix: '%' }),
+    scales: {
+      x: { type: 'logarithmic', grid: { color: gridColor() }, title: { display: true, text: 'Cache size (keys)', color: '#7a80a0' } },
+      y: { min: 0, max: 100, grid: { color: gridColor() }, title: { display: true, text: 'Miss rate (%)', color: '#7a80a0' } }
+    }
+  }
+});
+
+// Trace results table
+document.getElementById('trace-table-body').innerHTML = TRACE.configs.map((cfg, i) => `
+  <tr>
+    <td><span style="color:${COLORS[cfg].b}; font-weight:600;">${LABELS[cfg]}</span></td>
+    <td>${(TRACE.hit_rate[i] * 100).toFixed(1)}%</td>
+    <td>${(TRACE.backend_hit_rate[i] * 100).toFixed(1)}%</td>
+    <td>${TRACE.p50[i].toFixed(1)} ms</td>
+    <td style="font-weight:600;">${TRACE.p95[i].toFixed(1)} ms</td>
+    <td>${TRACE.p99[i].toFixed(1)} ms</td>
+    <td style="color:${TRACE.error[i] > 0.01 ? 'var(--no)' : 'var(--accent2)'};">${(TRACE.error[i]*100).toFixed(2)}%</td>
+  </tr>`).join('');
 
 // ── TAB SWITCHER ─────────────────────────────────
 function switchTab(name, el) {
