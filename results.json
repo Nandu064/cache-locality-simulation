@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "version": "1.2",
+    "version": "1.3",
     "n_requests_per_trial": 10000,
     "n_trials": 5,
     "n_keys": 5000,
@@ -2152,5 +2152,203 @@
         0.1263
       ]
     ]
+  },
+  "trace_validation": {
+    "source": "Twitter twemcache cluster10 (10% sample), 500K GET requests",
+    "n_requests": 500000,
+    "n_unique_keys": 499816,
+    "n_unique_clients": 6110,
+    "cache_size_pct": 0.1,
+    "effective_zipfian_alpha": 0.092,
+    "results_by_config": {
+      "NO_CACHE": {
+        "hit_rate": 0.0,
+        "backend_hit_rate": 1.0,
+        "p50_ms": 1187.85,
+        "p95_ms": 4647.67,
+        "p99_ms": 7061.07,
+        "error_rate": 0.6477
+      },
+      "LRU_CACHE": {
+        "hit_rate": 0.0004,
+        "backend_hit_rate": 0.9996,
+        "p50_ms": 194.75,
+        "p95_ms": 450.81,
+        "p99_ms": 625.86,
+        "error_rate": 0.0022
+      },
+      "PARTITIONED_CACHE": {
+        "hit_rate": 0.0004,
+        "backend_hit_rate": 0.9996,
+        "p50_ms": 167.87,
+        "p95_ms": 388.45,
+        "p99_ms": 552.33,
+        "error_rate": 0.0013
+      },
+      "CLIENT_AFFINITY": {
+        "hit_rate": 0.0,
+        "backend_hit_rate": 1.0,
+        "p50_ms": 160.59,
+        "p95_ms": 375.26,
+        "p99_ms": 539.09,
+        "error_rate": 0.0012
+      }
+    },
+    "mrc": [
+      [
+        1,
+        0.9999
+      ],
+      [
+        2,
+        0.9998
+      ],
+      [
+        3,
+        0.9998
+      ],
+      [
+        4,
+        0.9997
+      ],
+      [
+        5,
+        0.9997
+      ],
+      [
+        7,
+        0.9997
+      ],
+      [
+        10,
+        0.9997
+      ],
+      [
+        14,
+        0.9997
+      ],
+      [
+        19,
+        0.9996
+      ],
+      [
+        25,
+        0.9996
+      ],
+      [
+        34,
+        0.9996
+      ],
+      [
+        46,
+        0.9996
+      ],
+      [
+        62,
+        0.9996
+      ],
+      [
+        83,
+        0.9996
+      ],
+      [
+        112,
+        0.9996
+      ],
+      [
+        151,
+        0.9996
+      ],
+      [
+        203,
+        0.9996
+      ],
+      [
+        272,
+        0.9996
+      ],
+      [
+        366,
+        0.9996
+      ],
+      [
+        492,
+        0.9996
+      ],
+      [
+        661,
+        0.9996
+      ],
+      [
+        888,
+        0.9996
+      ],
+      [
+        1193,
+        0.9996
+      ],
+      [
+        1603,
+        0.9996
+      ],
+      [
+        2154,
+        0.9996
+      ],
+      [
+        2894,
+        0.9996
+      ],
+      [
+        3888,
+        0.9996
+      ],
+      [
+        5223,
+        0.9996
+      ],
+      [
+        7017,
+        0.9996
+      ],
+      [
+        9426,
+        0.9996
+      ],
+      [
+        12663,
+        0.9996
+      ],
+      [
+        17012,
+        0.9996
+      ],
+      [
+        22854,
+        0.9996
+      ],
+      [
+        30702,
+        0.9996
+      ],
+      [
+        41246,
+        0.9996
+      ],
+      [
+        55410,
+        0.9996
+      ],
+      [
+        74438,
+        0.9996
+      ],
+      [
+        100000,
+        0.9996
+      ]
+    ],
+    "mrc_by_clients": {},
+    "finding": "Cluster10 exhibits a streaming access pattern (alpha~0.09), far below the synthetic range (0.8-1.5). Hit rate is near 0% for all cache architectures, confirming that workload alpha must be characterized before cache architecture selection has any value."
   }
 }

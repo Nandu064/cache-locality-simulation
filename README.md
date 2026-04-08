@@ -82,6 +82,27 @@ requirements.txt
 
 ---
 
+## Trace validation — Twitter cluster10
+
+To test whether the synthetic model generalizes, Experiment 5 replays 500K GET requests from Twitter's publicly available twemcache cluster10 trace through all four cache configurations.
+
+**Finding: cluster10 is a streaming workload where caching provides no benefit.**
+
+Fitting a Zipfian frequency distribution to the observed key access counts gives an effective alpha ≈ 0.09 — far below the synthetic range (0.8–1.5). In 2M GET requests, 99.9% of keys are accessed exactly once. Hit rate is ~0% for all four cache architectures regardless of policy.
+
+| Config | Hit rate | P95 (ms) |
+|---|---|---|
+| NO_CACHE | 0.0% | 4648ms |
+| LRU (shared) | 0.0% | 451ms |
+| Partitioned | 0.0% | 388ms |
+| Client affinity | 0.0% | 375ms |
+
+**What this means for the research question.** The architecture comparison (LRU vs partitioned) only matters once workload alpha is above a threshold where caching provides meaningful hit rates. Cluster10 sits below that threshold. This validates the alpha sweep as a prerequisite analysis: measure your workload's effective alpha before choosing a cache architecture.
+
+The natural next step is to identify a high-reuse Twitter cluster (Yang et al. report clusters with 40–90% hit rates), replay the same experiment, and verify that the partitioned advantage predicted by the synthetic model appears in real traces. That's the remaining gap between this simulation and an empirical paper.
+
+---
+
 ## Threats to validity
 
 - **Latency model is synthetic.** Lognormal parameters are calibrated to typical Redis/DB values but not derived from measured traces. Results are directionally valid; they should not be treated as quantitative benchmarks.

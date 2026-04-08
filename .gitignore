@@ -2,3 +2,6 @@
 .DS_Store
 __pycache__/
 *.pyc
+make_summary.py
+research_summary.pdf
+traces/
