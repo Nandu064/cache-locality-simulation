@@ -730,40 +730,62 @@ tbody tr:hover td { background: var(--surface2); }
 <!-- ════════════════ TRACE VALIDATION ════════════════ -->
 <div class="panel" id="panel-trace">
 
-  <div class="card" style="border-left:4px solid var(--warn); background:rgba(245,158,11,.07);">
-    <h3 style="color:var(--warn);">⚠ Trace Finding: Cluster10 is a Streaming Workload</h3>
-    <p style="color:var(--muted); margin-top:8px; line-height:1.7;">
-      500K GET requests from Twitter twemcache <b style="color:var(--text)">cluster10</b> were replayed through all four cache configurations.
-      The effective Zipfian alpha, measured via OLS on log-log rank vs frequency, is <b style="color:var(--warn)">α ≈ 0.09</b> —
-      far below the synthetic range (0.8–1.5). In 2M requests, <b style="color:var(--text)">99.9% of keys are accessed exactly once</b>.
-      Hit rate is ~0% for all architectures. <b style="color:var(--text)">Cache architecture selection only matters once workload alpha is high enough for caching to work.</b>
-    </p>
-    <div style="display:flex; gap:24px; margin-top:14px; flex-wrap:wrap;">
-      <div style="background:var(--surface2); border-radius:8px; padding:12px 20px; text-align:center;">
-        <div style="font-size:22px; font-weight:700; color:var(--warn);">0.09</div>
-        <div style="font-size:11px; color:var(--muted); margin-top:2px;">Effective Zipfian α</div>
+  <!-- Two-cluster summary cards -->
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+
+    <div class="card" style="border-left:4px solid var(--warn); background:rgba(245,158,11,.07);">
+      <h3 style="color:var(--warn);">Cluster10 — Streaming Workload</h3>
+      <p style="color:var(--muted); font-size:12px; margin:8px 0 12px;">
+        α≈0.09. 99.9% of keys accessed exactly once in 2M requests. Hit rate ~0% for all architectures.
+        Cache architecture selection is irrelevant below the caching threshold.
+      </p>
+      <div style="display:flex; gap:12px; flex-wrap:wrap;">
+        <div style="background:var(--surface2); border-radius:8px; padding:10px 16px; text-align:center;">
+          <div style="font-size:20px; font-weight:700; color:var(--warn);">0.09</div>
+          <div style="font-size:10px; color:var(--muted);">Fitted α</div>
+        </div>
+        <div style="background:var(--surface2); border-radius:8px; padding:10px 16px; text-align:center;">
+          <div style="font-size:20px; font-weight:700; color:var(--no);">~0%</div>
+          <div style="font-size:10px; color:var(--muted);">Hit rate (all configs)</div>
+        </div>
+        <div style="background:var(--surface2); border-radius:8px; padding:10px 16px; text-align:center;">
+          <div style="font-size:20px; font-weight:700; color:var(--muted);">499K</div>
+          <div style="font-size:10px; color:var(--muted);">Unique keys / 500K GETs</div>
+        </div>
       </div>
-      <div style="background:var(--surface2); border-radius:8px; padding:12px 20px; text-align:center;">
-        <div style="font-size:22px; font-weight:700; color:var(--no);">99.9%</div>
-        <div style="font-size:11px; color:var(--muted); margin-top:2px;">Keys accessed once only</div>
-      </div>
-      <div style="background:var(--surface2); border-radius:8px; padding:12px 20px; text-align:center;">
-        <div style="font-size:22px; font-weight:700; color:var(--text);">6,110</div>
-        <div style="font-size:11px; color:var(--muted); margin-top:2px;">Unique clients</div>
-      </div>
-      <div style="background:var(--surface2); border-radius:8px; padding:12px 20px; text-align:center;">
-        <div style="font-size:22px; font-weight:700; color:var(--text);">499,816</div>
-        <div style="font-size:11px; color:var(--muted); margin-top:2px;">Unique keys / 500K GETs</div>
+    </div>
+
+    <div class="card" style="border-left:4px solid var(--accent2); background:rgba(52,211,153,.05);">
+      <h3 style="color:var(--accent2);">Cluster24 — High-Reuse Workload ✓</h3>
+      <p style="color:var(--muted); font-size:12px; margin:8px 0 12px;">
+        α≈1.585 (R²=0.986). 71 avg requests/key. Partitioned beats LRU on P95 by 24ms —
+        the synthetic prediction holds on real traces.
+      </p>
+      <div style="display:flex; gap:12px; flex-wrap:wrap;">
+        <div style="background:var(--surface2); border-radius:8px; padding:10px 16px; text-align:center;">
+          <div style="font-size:20px; font-weight:700; color:var(--accent2);">1.585</div>
+          <div style="font-size:10px; color:var(--muted);">Fitted α</div>
+        </div>
+        <div style="background:var(--surface2); border-radius:8px; padding:10px 16px; text-align:center;">
+          <div style="font-size:20px; font-weight:700; color:var(--accent2);">90.9%</div>
+          <div style="font-size:10px; color:var(--muted);">LRU + Partitioned hit rate</div>
+        </div>
+        <div style="background:var(--surface2); border-radius:8px; padding:10px 16px; text-align:center;">
+          <div style="font-size:20px; font-weight:700; color:var(--accent2);">156ms</div>
+          <div style="font-size:10px; color:var(--muted);">Partitioned P95</div>
+        </div>
       </div>
     </div>
   </div>
 
+  <!-- Cluster24 charts -->
   <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px;">
     <div class="card">
-      <h3>P95 Latency — Trace vs Synthetic (α=1.3) @ 10K concurrency</h3>
+      <h3>Cluster24 — P95 Latency vs Synthetic (α=1.3) @ 10K</h3>
       <p style="color:var(--muted); font-size:12px; margin:6px 0 12px;">
-        Trace hits same P95 as synthetic NO_CACHE — confirming near-zero hit rate.
-        Architecture differences persist because miss-induced queue pressure still varies by routing.
+        Partitioned wins P95 on real traces (156ms) vs LRU (180ms) — 13% improvement.
+        Same mechanism as synthetic: distributed queue pressure, not hit rate.
+        Client affinity collapses because 8,078 clients share only 1,393 cache slots.
       </p>
       <div style="height:240px; position:relative;">
         <canvas id="c-trace-p95"></canvas>
@@ -771,10 +793,11 @@ tbody tr:hover td { background: var(--surface2); }
     </div>
 
     <div class="card">
-      <h3>Hit Rate — Trace vs Synthetic (α=1.3)</h3>
+      <h3>Cluster24 — Hit Rate vs Synthetic</h3>
       <p style="color:var(--muted); font-size:12px; margin:6px 0 12px;">
-        Synthetic workloads (α=0.8–1.5) all show meaningful hit rates. Cluster10 (α≈0.09)
-        collapses to 0% across all policies — the workload is below the caching threshold.
+        LRU and Partitioned both hit 90.9% on real traces — above the synthetic 79.7%.
+        Client affinity collapses to 2.2% due to insufficient per-node capacity at real-world client counts.
+        This validates Yiyang's point: deployment constraints matter beyond just alpha.
       </p>
       <div style="height:240px; position:relative;">
         <canvas id="c-trace-hitrate"></canvas>
@@ -783,11 +806,10 @@ tbody tr:hover td { background: var(--surface2); }
   </div>
 
   <div class="card" style="margin-top:16px;">
-    <h3>MRC Comparison — Synthetic α curves vs Twitter Cluster10</h3>
+    <h3>MRC — Synthetic α curves vs Cluster10 (streaming) vs Cluster24 (high-reuse)</h3>
     <p style="color:var(--muted); font-size:12px; margin:6px 0 12px;">
-      Synthetic MRCs show rapidly falling miss rates as cache size grows.
-      Cluster10 (orange dashed) stays flat near 100% — no amount of cache helps a streaming workload.
-      This places cluster10 below α=0.8, the lowest synthetic condition tested.
+      Cluster24 (green dashed) follows the synthetic α=1.5 curve closely — confirming the IRM model holds.
+      Cluster10 (orange dashed) stays flat at 100% — streaming workload, cache is useless regardless of size.
     </p>
     <div style="height:280px; position:relative;">
       <canvas id="c-trace-mrc"></canvas>
@@ -795,12 +817,11 @@ tbody tr:hover td { background: var(--surface2); }
   </div>
 
   <div class="card" style="margin-top:16px;">
-    <h3>Full Results — Twitter Cluster10</h3>
+    <h3>Full Results — Twitter Cluster24 (high-reuse, α≈1.585)</h3>
     <div class="table-scroll">
       <table>
         <thead><tr>
-          <th>Config</th><th>Hit Rate</th><th>Backend Hit Rate</th>
-          <th>P50 (ms)</th><th>P95 (ms)</th><th>P99 (ms)</th><th>Error Rate</th>
+          <th>Config</th><th>Hit Rate</th><th>P50 (ms)</th><th>P95 (ms)</th><th>P99 (ms)</th><th>Error Rate</th>
         </tr></thead>
         <tbody id="trace-table-body"></tbody>
       </table>
@@ -851,20 +872,45 @@ const MRC_CLIENTS = {
 const MISS10 = { alpha:[10.2,6.1,1.5,0.6], clients:[4.1,5.5,12.0,18.5,27.2,26.4] };
 
 // ── TRACE VALIDATION DATA ─────────────────────────
-const TRACE = {
+// ── Cluster10 (streaming, α≈0.09) ────────────────
+const TRACE_C10 = {
   configs: ['NO_CACHE','LRU_CACHE','PARTITIONED_CACHE','CLIENT_AFFINITY'],
-  hit_rate:         [0, 0, 0, 0],
-  backend_hit_rate: [1.0, 1.0, 1.0, 1.0],
-  p50:   [1182.3, 2.2, 9.2, 7.2],   // same latency model — backend for all
-  p95:   [4647.7, 450.8, 388.4, 375.3],
-  p99:   [6200.0, 650.0, 560.0, 545.0],
-  error: [0.6477, 0.0022, 0.0013, 0.0012],
-  // synthetic alpha=1.3 @ 10K for comparison
-  synth_p95:    [4616.6, 280.6, 239.6, 265.9],
-  synth_hit:    [0, 79.7, 79.5, 69.6],
-  // MRC: flat near 100% miss rate for cluster10
-  mrc_trace: [[1,1.0],[10,1.0],[100,1.0],[1000,1.0],[5000,1.0],[10000,1.0],[50000,1.0],[100000,1.0]],
-  alpha: 0.092,
+  hit_rate:  [0, 0, 0, 0],
+  p95:       [4647.7, 450.8, 388.4, 375.3],
+  error:     [0.6477, 0.0022, 0.0013, 0.0012],
+  mrc:       [[1,1.0],[10,1.0],[100,1.0],[1000,1.0],[5000,1.0],[10000,1.0],[50000,1.0]],
+  alpha:     0.092,
+  label:     'cluster10 (α≈0.09, streaming)',
+};
+
+// ── Cluster24 (high-reuse, α≈1.585) ──────────────
+const TRACE_C24 = {
+  configs: ['NO_CACHE','LRU_CACHE','PARTITIONED_CACHE','CLIENT_AFFINITY'],
+  hit_rate:  [0, 90.9, 90.9, 2.2],
+  p50:       [1187.9, 2.1, 8.5, 158.3],
+  p95:       [4647.7, 180.7, 156.7, 373.5],
+  p99:       [7061.1, 366.1, 312.5, 536.8],
+  error:     [0.6477, 0.0002, 0.0001, 0.0012],
+  mrc:       [[1,0.8465],[2,0.8021],[4,0.7455],[9,0.6601],[18,0.5753],[39,0.4846],[81,0.3963],[170,0.2979],[354,0.21],[739,0.1374],[1393,0.085],[2513,0.0616],[5236,0.0384],[13934,0.0279]],
+  alpha:     1.585,
+  r2:        0.986,
+  n_keys:    13935,
+  n_clients: 8078,
+  label:     'cluster24 (α≈1.585, high-reuse)',
+};
+
+// ── Synthetic for comparison ──────────────────────
+const TRACE = {
+  configs:   TRACE_C24.configs,
+  hit_rate:  TRACE_C24.hit_rate,
+  p50:       TRACE_C24.p50,
+  p95:       TRACE_C24.p95,
+  p99:       TRACE_C24.p99,
+  error:     TRACE_C24.error,
+  mrc_trace: TRACE_C24.mrc,
+  synth_p95: [4616.6, 280.6, 239.6, 265.9],
+  synth_hit: [0, 79.7, 79.5, 69.6],
+  alpha:     1.585,
 };
 
 // ── THEME ────────────────────────────────────────
@@ -1208,7 +1254,7 @@ new Chart(document.getElementById('c-trace-p95'), {
     labels: traceLabels,
     datasets: [
       {
-        label: 'Trace (cluster10, α≈0.09)',
+        label: 'cluster24 (α≈1.585, real trace)',
         data: TRACE.p95,
         backgroundColor: TRACE.configs.map(c => COLORS[c].bg),
         borderColor: TRACE.configs.map(c => COLORS[c].b),
@@ -1239,7 +1285,7 @@ new Chart(document.getElementById('c-trace-hitrate'), {
     labels: traceLabels,
     datasets: [
       {
-        label: 'Trace (cluster10, α≈0.09)',
+        label: 'cluster24 (α≈1.585, real trace)',
         data: TRACE.hit_rate,
         backgroundColor: TRACE.configs.map(c => COLORS[c].bg),
         borderColor: TRACE.configs.map(c => COLORS[c].b),
@@ -1277,14 +1323,24 @@ new Chart(document.getElementById('c-trace-mrc'), {
         tension: 0.3,
       })),
       {
-        label: 'Twitter cluster10 (α≈0.09)',
-        data: TRACE.mrc_trace.map(([x, y]) => ({ x, y: y * 100 })),
+        label: 'cluster10 (α≈0.09, streaming)',
+        data: TRACE_C10.mrc.map(([x, y]) => ({ x, y: y * 100 })),
         borderColor: '#f59e0b',
         backgroundColor: 'transparent',
         borderWidth: 2.5,
         borderDash: [6, 3],
         pointRadius: 0,
         tension: 0,
+      },
+      {
+        label: 'cluster24 (α≈1.585, high-reuse) ✓',
+        data: TRACE_C24.mrc.map(([x, y]) => ({ x, y: y * 100 })),
+        borderColor: '#34d399',
+        backgroundColor: 'transparent',
+        borderWidth: 2.5,
+        borderDash: [4, 3],
+        pointRadius: 0,
+        tension: 0.3,
       }
     ]
   },
@@ -1297,16 +1353,15 @@ new Chart(document.getElementById('c-trace-mrc'), {
   }
 });
 
-// Trace results table
-document.getElementById('trace-table-body').innerHTML = TRACE.configs.map((cfg, i) => `
+// Trace results table (cluster24)
+document.getElementById('trace-table-body').innerHTML = TRACE_C24.configs.map((cfg, i) => `
   <tr>
     <td><span style="color:${COLORS[cfg].b}; font-weight:600;">${LABELS[cfg]}</span></td>
-    <td>${(TRACE.hit_rate[i] * 100).toFixed(1)}%</td>
-    <td>${(TRACE.backend_hit_rate[i] * 100).toFixed(1)}%</td>
-    <td>${TRACE.p50[i].toFixed(1)} ms</td>
-    <td style="font-weight:600;">${TRACE.p95[i].toFixed(1)} ms</td>
-    <td>${TRACE.p99[i].toFixed(1)} ms</td>
-    <td style="color:${TRACE.error[i] > 0.01 ? 'var(--no)' : 'var(--accent2)'};">${(TRACE.error[i]*100).toFixed(2)}%</td>
+    <td style="color:${TRACE_C24.hit_rate[i] > 50 ? 'var(--accent2)' : 'var(--no)'}; font-weight:600;">${TRACE_C24.hit_rate[i].toFixed(1)}%</td>
+    <td>${TRACE_C24.p50[i].toFixed(1)} ms</td>
+    <td style="font-weight:600; color:${TRACE_C24.p95[i] < 200 ? 'var(--accent2)' : TRACE_C24.p95[i] > 400 ? 'var(--no)' : 'var(--text)'};">${TRACE_C24.p95[i].toFixed(1)} ms</td>
+    <td>${TRACE_C24.p99[i].toFixed(1)} ms</td>
+    <td style="color:${TRACE_C24.error[i] > 0.01 ? 'var(--no)' : 'var(--accent2)'};">${(TRACE_C24.error[i]*100).toFixed(2)}%</td>
   </tr>`).join('');
 
 // ── TAB SWITCHER ─────────────────────────────────
