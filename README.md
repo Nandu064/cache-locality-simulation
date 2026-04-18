@@ -1,6 +1,6 @@
 # Cache Effectiveness and Tail Latency in High-Concurrency API Workloads
 
-A simulation study examining when partitioned caches outperform shared LRU — validated against four Twitter production traces.
+A simulation study examining when partitioned caches outperform shared LRU — evaluated against four Twitter production traces.
 
 **Harish Yerraguntla** · [Portfolio](https://nandu064.github.io/portfolio/) · [GitHub](https://github.com/Nandu064)
 
