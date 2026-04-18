@@ -1,6 +1,6 @@
 # Cache Effectiveness and Tail Latency in High-Concurrency API Workloads
 
-A simulation study examining when partitioned caches outperform shared LRU — and when they don't.
+A simulation study examining when partitioned caches outperform shared LRU — validated against four Twitter production traces.
 
 **Harish Yerraguntla** · [Portfolio](https://nandu064.github.io/portfolio/) · [GitHub](https://github.com/Nandu064)
 
@@ -8,113 +8,110 @@ A simulation study examining when partitioned caches outperform shared LRU — a
 
 ## Research question
 
-> When does partitioned caching outperform shared LRU because of locality concentration, and when does global LRU win because of cross-client reuse?
-
-I built this to answer a question I kept running into at work: our Redis cache would hold 89% hit rate under normal load, but P95 latency would still blow past SLA thresholds during traffic spikes. The P50 looked fine. The P95 told a different story.
-
-That gap — between median and tail behavior under concurrent load — is what this simulation studies. It's not a Redis benchmark. It's a controlled experiment on how cache architecture affects latency distribution as concurrency scales.
+> When does partitioned caching outperform shared LRU because of locality concentration — and can a simple workload metric predict the crossover without running the experiment?
 
 ---
 
 ## Key findings
 
-**LRU wins on P50. Partitioned wins on P95 at scale.**
+**1. Partitioned consistently beats LRU on P95 across all workload types.**
 
-At 10K concurrency with alpha=1.3 (Twitter-typical Zipfian skew):
+The advantage is backend queue pressure distributed across shards, not hit rate. Both LRU and Partitioned track near-identical hit rates across every cluster tested.
 
-| Config | P95 (ms) | Hit rate | Error rate |
-|---|---|---|---|
-| No cache | 4617ms | — | 64.6% |
-| LRU (shared) | 214 ± 10ms | 88.3% | — |
-| Partitioned | 183 ± 7ms | 88.1% | — |
-| Client affinity | 266 ± 6ms | 69.6% | — |
+| Concurrency | NO_CACHE | LRU | Partitioned | Client Affinity |
+|---|---|---|---|---|
+| 1K | 638ms | 191 ± 5ms | 187 ± 4ms | 224 ± 6ms |
+| 10K | 4617ms | 281 ± 7ms | 240 ± 4ms | 266 ± 6ms |
+| 25K | 11328ms | 431 ± 12ms | 330 ± 3ms | 356 ± 7ms |
+| 50K | 22517ms | 684 ± 23ms | 480 ± 7ms | 511 ± 13ms |
 
-The partitioned advantage grows with concurrency. At 50K: LRU P95 = 482ms, partitioned = 350ms. The gap is backend queue pressure distributed across shards, not hit rate — both LRU and partitioned sit near 88% hits.
+**2. The real crossover is Partitioned vs Client Affinity — not vs LRU.**
 
-**Concurrency genuinely shifts locality structure.**
+Tested across 4 real Twitter twemcache clusters spanning α = 0.09–1.59:
 
-Each client has its own hot 5% key subset. As client count grows, the global working set expands. Miss rate at a fixed 10% cache size:
+| Cluster | α | LRU hit rate | Part. P95 | Affinity P95 | Winner |
+|---|---|---|---|---|---|
+| cluster10 | 0.092 | 0.04% | 388ms | 375ms | Affinity (barely) |
+| cluster19 | 0.735 | 9.0% | 379ms | 375ms | Affinity (barely) |
+| cluster7  | 1.067 | 71.0% | 272ms | 375ms | **Partitioned +103ms** |
+| cluster24 | 1.585 | 90.9% | 157ms | 374ms | **Partitioned +217ms** |
 
-| Clients | Miss rate at 10% cache |
-|---|---|
-| 1 | 4.1% |
-| 5 | 12.0% |
-| 10 | 18.5% |
-| 20 | 27.2% |
+Client affinity wins at low α via node-count distribution (queue routing benefit). It collapses above α ≈ 0.8 once clients share popular keys and per-client cache slots become insufficient.
 
-This is the mechanism Ding's partition approximation (TOMPECS'25) is built for — not just reduced contention, but genuine per-partition locality concentration.
+**3. A single metric predicts the crossover with R²=0.977.**
 
-**Alpha is the primary predictor of cache value.**
+`log(avg_requests_per_unique_object)` linearly predicts the Partitioned vs Affinity P95 gap across all 4 clusters. No simulation needed — compute this from any access log.
 
-At alpha=0.8 (flat distribution), LRU hits 41.4% and P50 stays above 100ms. At alpha=1.5, it hits 94.6% with P50 = 2.1ms. The MRC shape changes completely. High-alpha workloads yield most of their locality from tiny caches.
+**Decision rule:**
+- `avg_req/obj < 1.1` → streaming regime, architecture choice doesn't affect cache efficiency
+- `avg_req/obj ≥ 1.1` → reuse regime, use Partitioned over Client Affinity
+
+**4. Non-stochastic oracle trace analysis confirms streaming workload diagnosis.**
+
+Analysis of cluster10 using the `oracleGeneral` binary format (`next_access_vtime` field):
+
+| Metric | Value | Interpretation |
+|---|---|---|
+| One-hit wonder fraction | 50% | Half of all requests go to objects never seen again |
+| Median reuse distance | 500,009 | Spans the full trace window — no temporal locality |
+| Objects with ≥3 accesses | 0.06% | Essentially no object is accessed frequently enough to warm a cache |
+| Fitted Zipf α (oracle) | 0.002 (R²=0.034) | Flat distribution — no Zipfian structure |
+
+This directly quantifies IRM assumption violation, extending the qualitative finding ("streaming workloads are uncacheable") to a precise measurement.
 
 ---
 
 ## Methodology
 
-**Workload model.** All four cache configurations are evaluated against the same merged multi-client request stream, ensuring a fair apples-to-apples comparison. Each of `n_clients` clients generates requests from its own private hot subset (5% of the key space, Zipfian-distributed) plus a shared global tail. Streams are interleaved to simulate concurrent arrival.
+**Workload model.** All four configurations are evaluated against the same merged multi-client request stream. Each client has a private hot key subset (5% of keys, Zipfian) plus a shared global tail. Streams are interleaved to simulate concurrent arrival. 5 trials per condition, 95% CI reported. 220 total trials.
 
 **Cache models.**
 
-| Config | Cache model | Routing |
+| Config | Model | Routing |
 |---|---|---|
-| `NO_CACHE` | None — every request hits backend | — |
+| `NO_CACHE` | None | — |
 | `LRU_CACHE` | Single shared LRU (10% of key space) | Key → global cache |
-| `PARTITIONED_CACHE` | 8 shards, each LRU (total = 10% of key space) | Key mod 8 → shard |
-| `CLIENT_AFFINITY` | Per-client LRU (total = 10% of key space) | Client ID → node |
+| `PARTITIONED_CACHE` | 8 shards, each LRU (total = 10%) | Key mod 8 → shard |
+| `CLIENT_AFFINITY` | Per-client LRU (total = 10%) | Client ID → node |
 
-**Latency model.** Backend latency is lognormal (mean ≈ 120ms) plus exponential queue wait that scales with concurrency. Cache hit latency is lognormal (mean ≈ 2ms for LRU, ≈ 8ms for partitioned/affinity due to routing overhead). Error threshold: requests over 800ms are counted as errors.
+**Latency model.** Backend latency: lognormal (mean ≈ 120ms) + exponential queue wait scaling with concurrency. Cache hit: lognormal (mean ≈ 2ms LRU, ≈ 8ms partitioned/affinity). Error threshold: >800ms.
 
-**Statistical rigor.** Each condition is run 5 times with independent seeds. Results report mean ± 95% confidence interval (t-distribution). Total: 220 trials across 44 conditions.
-
-**Miss ratio curves (MRC).** Computed via LRU stack simulation across log-spaced cache sizes. MRC by client count shows how concurrency shifts the global reuse distance distribution.
+**Trace validation.** Traces streamed directly from [CMU FTP](https://ftp.pdl.cmu.edu/pub/datasets/twemcacheWorkload/open_source/) — no full download required. First 500K GET/GETS operations loaded per cluster.
 
 ---
 
 ## Repo structure
 
 ```
-simulate.py     — experiment engine (workload gen, cache models, multi-trial CI runner, MRC)
-index.html      — interactive dashboard (5 tabs, CI error bars, MRC by client count)
-results.json    — raw output from 220 simulation trials
+simulate.py              — experiment engine (workload gen, cache models, MRC, CI)
+run_crossover.py         — multi-cluster crossover experiment (streams traces from URL)
+predict_crossover.py     — prediction model: log(avg_req/obj) → P95 gap, R²=0.977
+analyze_nonstochastic.py — oracle trace analysis (next_access_vtime, one-hit wonders)
+index.html               — interactive dashboard (7 tabs including Crossover Analysis)
+results.json             — synthetic experiment results (220 trials)
+results_cluster24.json   — cluster24 trace experiment results
+crossover_results.json   — 4-cluster crossover experiment results
+prediction_model.json    — fitted model output and decision rule
+results_nonstochastic.json — oracle trace non-stochastic metrics
 requirements.txt
 ```
 
 ---
 
-## Trace validation — Twitter cluster10
-
-To test whether the synthetic model generalizes, Experiment 5 replays 500K GET requests from Twitter's publicly available twemcache cluster10 trace through all four cache configurations.
-
-**Finding: cluster10 is a streaming workload where caching provides no benefit.**
-
-Fitting a Zipfian frequency distribution to the observed key access counts gives an effective alpha ≈ 0.09 — far below the synthetic range (0.8–1.5). In 2M GET requests, 99.9% of keys are accessed exactly once. Hit rate is ~0% for all four cache architectures regardless of policy.
-
-| Config | Hit rate | P95 (ms) |
-|---|---|---|
-| NO_CACHE | 0.0% | 4648ms |
-| LRU (shared) | 0.0% | 451ms |
-| Partitioned | 0.0% | 388ms |
-| Client affinity | 0.0% | 375ms |
-
-**What this means for the research question.** The architecture comparison (LRU vs partitioned) only matters once workload alpha is above a threshold where caching provides meaningful hit rates. Cluster10 sits below that threshold. This validates the alpha sweep as a prerequisite analysis: measure your workload's effective alpha before choosing a cache architecture.
-
-The natural next step is to identify a high-reuse Twitter cluster (Yang et al. report clusters with 40–90% hit rates), replay the same experiment, and verify that the partitioned advantage predicted by the synthetic model appears in real traces. That's the remaining gap between this simulation and an empirical paper.
-
----
-
 ## Threats to validity
 
-- **Latency model is synthetic.** Lognormal parameters are calibrated to typical Redis/DB values but not derived from measured traces. Results are directionally valid; they should not be treated as quantitative benchmarks.
-- **Queue model is approximate.** Backend wait is modeled as exponential rather than an M/M/c queue. This underestimates tail latency under sustained overload.
-- **Throughput is not wall-clock.** "Effective throughput" divides total request count by cumulative simulated latency divided by concurrency. It measures work density under the latency model, not observed RPS.
-- **Workload is synthetic.** Real cache traces (Twitter, Meta) have temporal locality patterns, key expiry, and write traffic not captured here. The natural extension is to replay public traces through this framework.
+- **Latency model is synthetic.** Lognormal parameters calibrated to typical Redis/DB values, not measured. Results are directionally valid, not quantitative benchmarks.
+- **Queue model is approximate.** Exponential wait rather than M/M/c. Underestimates tail latency under sustained overload.
+- **IRM deviation is approximated.** CoV of inter-access intervals used as IRM deviation proxy; rigorous metrics (Leo Sciortino's toolkit, pending) would strengthen this.
+- **Prediction model has 4 data points.** R²=0.977 is promising but needs validation on additional clusters to confirm generality.
 
 ---
 
 ## Next steps
 
-Replay Twitter's public cache trace through the same MRC framework to validate whether the client-count locality shift holds empirically. That's the bridge from this simulation to something submittable to MEMSYS or HotStorage.
+- Validate prediction model on additional Twitter clusters across the α=0.1–2.0 range
+- Incorporate Leo Sciortino's IRM deviation metrics to replace the CoV approximation
+- Extend to write-heavy and TTL workloads
 
 ---
 
@@ -122,10 +119,20 @@ Replay Twitter's public cache trace through the same MRC framework to validate w
 
 ```bash
 pip install -r requirements.txt
-python simulate.py
-# outputs results.json
 
-# view the dashboard:
+# Synthetic experiments
+python simulate.py
+
+# Multi-cluster crossover (streams traces from CMU FTP — no download needed)
+python run_crossover.py
+
+# Prediction model
+python predict_crossover.py
+
+# Non-stochastic oracle analysis (requires oracleGeneral .zst trace)
+python analyze_nonstochastic.py
+
+# Dashboard
 python3 -m http.server 8080
 # visit http://localhost:8080
 ```
