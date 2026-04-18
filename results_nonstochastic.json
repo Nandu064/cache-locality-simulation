@@ -1,0 +1,22 @@
+[
+  {
+    "label": "cluster10 (streaming, \u03b1\u22480.09)",
+    "n_requests": 1000000,
+    "n_unique_objects": 500010,
+    "avg_requests_per_obj": 2.0,
+    "one_hit_wonder_frac": 0.5,
+    "one_hit_wonder_pct": 50.0,
+    "frac_objects_3plus": 0.0006,
+    "pct_objects_3plus": 0.06,
+    "fitted_alpha": 0.0021,
+    "r_squared": 0.034,
+    "reuse_distance": {
+      "p50": 500009.0,
+      "p95": 950003.1,
+      "p99": 989998.2,
+      "mean": 500007.2
+    },
+    "irm_deviation_cov": null,
+    "irm_note": "CoV of inter-access intervals. CoV\u22481 = Poisson/IRM-like. CoV>1 = bursty. CoV<1 = periodic."
+  }
+]
