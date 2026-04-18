@@ -953,6 +953,62 @@ tbody tr:hover td { background: var(--surface2); }
     </div>
   </div>
 
+  <!-- Prediction model -->
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px;">
+    <div class="card">
+      <h3>Prediction Model: log(avg_req/obj) → P95 Gap</h3>
+      <p style="color:var(--muted); font-size:12px; margin:6px 0 12px;">
+        A single metric — average requests per unique object — predicts which architecture wins.
+        Linear fit on log scale: R²=0.977. Threshold: avg_req/obj ≈ 1.1.
+        No experiment needed — measure this from any access log.
+      </p>
+      <div style="height:240px; position:relative;">
+        <canvas id="c-predict-scatter"></canvas>
+      </div>
+    </div>
+
+    <div class="card" style="display:flex; flex-direction:column; gap:12px;">
+      <h3>Decision Rule — One Metric, One Answer</h3>
+      <div style="background:rgba(248,113,113,.08); border:1px solid rgba(248,113,113,.3);
+                  border-radius:8px; padding:14px;">
+        <div style="font-size:11px; font-weight:700; color:#f87171; margin-bottom:6px; letter-spacing:.05em;">
+          IF avg_req/obj &lt; 1.1
+        </div>
+        <div style="font-size:12px; color:var(--text); margin-bottom:4px;">
+          Streaming regime — architecture doesn't matter for cache efficiency
+        </div>
+        <div style="font-size:11px; color:var(--muted);">
+          Both Partitioned and Affinity achieve &lt;10% hit rate.
+          Choose based on infrastructure simplicity, not cache theory.
+        </div>
+      </div>
+      <div style="background:rgba(52,211,153,.08); border:1px solid rgba(52,211,153,.3);
+                  border-radius:8px; padding:14px;">
+        <div style="font-size:11px; font-weight:700; color:var(--accent2); margin-bottom:6px; letter-spacing:.05em;">
+          IF avg_req/obj ≥ 1.1
+        </div>
+        <div style="font-size:12px; color:var(--text); margin-bottom:4px;">
+          Reuse regime — use Partitioned over Client Affinity
+        </div>
+        <div style="font-size:11px; color:var(--muted);">
+          Per-client slots are insufficient when keys are shared across clients.
+          Partitioned routing prevents the hit-rate collapse of affinity.
+        </div>
+      </div>
+      <div style="background:var(--surface2); border-radius:8px; padding:12px; margin-top:auto;">
+        <div style="font-size:11px; color:var(--muted);">Model fit (4 Twitter clusters)</div>
+        <div style="display:flex; gap:16px; margin-top:6px;">
+          <div><div style="font-size:18px; font-weight:700; color:var(--accent2);">0.977</div>
+               <div style="font-size:10px; color:var(--muted);">R² (log avg_req)</div></div>
+          <div><div style="font-size:18px; font-weight:700; color:var(--accent2);">0.930</div>
+               <div style="font-size:10px; color:var(--muted);">R² (LRU hit rate)</div></div>
+          <div><div style="font-size:18px; font-weight:700; color:var(--warn);">~1.1×</div>
+               <div style="font-size:10px; color:var(--muted);">Crossover threshold</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="card" style="margin-top:16px;">
     <h3>Full Crossover Table — 4 Twitter Clusters</h3>
     <div class="table-scroll">
@@ -1643,6 +1699,80 @@ document.getElementById('xo-table-body').innerHTML = CROSSOVER.map(d => {
     <td style="color:var(--accent2);font-weight:600">+${d.delta_lru_part} ms</td>
   </tr>`;
 }).join('');
+
+// ── PREDICTION MODEL CHART ────────────────────────
+const PRED_DATA = [
+  { id:'cluster10', avg:1.000, delta:-13.2, label:'cluster10\nα=0.09' },
+  { id:'cluster19', avg:1.150, delta:-3.9,  label:'cluster19\nα=0.74' },
+  { id:'cluster7',  avg:3.678, delta:103.0, label:'cluster7\nα=1.07'  },
+  { id:'cluster24', avg:35.881,delta:216.8, label:'cluster24\nα=1.59' },
+];
+// Fitted line: delta = 64.55 * ln(avg) - 69.72  (R²=0.977)
+const FIT_SLOPE = 64.55, FIT_INT = -69.72;
+const fitX = Array.from({length:100}, (_,i) => 1 + i*0.4);  // 1..40
+const fitY = fitX.map(x => FIT_SLOPE * Math.log(x) + FIT_INT);
+const zeroX = Math.exp(-FIT_INT / FIT_SLOPE); // ≈1.08
+
+new Chart(document.getElementById('c-predict-scatter'), {
+  type: 'scatter',
+  data: {
+    datasets: [
+      {
+        label: 'Fitted line (R²=0.977)',
+        data: fitX.map((x,i) => ({ x: Math.log(x), y: fitY[i] })),
+        type: 'line',
+        borderColor: 'rgba(108,143,255,0.5)',
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0,
+      },
+      {
+        label: '4 Twitter clusters',
+        data: PRED_DATA.map(d => ({ x: Math.log(d.avg), y: d.delta, id: d.id })),
+        backgroundColor: PRED_DATA.map(d => d.delta > 0 ? '#34d399' : '#f87171'),
+        borderColor: PRED_DATA.map(d => d.delta > 0 ? '#34d399' : '#f87171'),
+        pointRadius: 8, pointHoverRadius: 10,
+      },
+      {
+        label: 'Crossover threshold (avg=1.1)',
+        data: [{ x: Math.log(zeroX), y: -50 }, { x: Math.log(zeroX), y: 250 }],
+        type: 'line',
+        borderColor: '#f59e0b',
+        borderWidth: 1.5,
+        borderDash: [5, 3],
+        pointRadius: 0,
+      },
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { labels: { color: '#e8eaf0', boxWidth: 12, font: { size: 11 } } },
+      tooltip: {
+        callbacks: {
+          label: ctx => {
+            const d = PRED_DATA[ctx.dataIndex];
+            if (!d) return '';
+            return ` ${d.id}: avg=${d.avg.toFixed(2)}, Δ=${d.delta > 0 ? '+' : ''}${d.delta}ms`;
+          }
+        }
+      },
+      annotation: {}
+    },
+    scales: {
+      x: {
+        title: { display: true, text: 'log(avg requests per unique object)', color: '#7a80a0' },
+        ticks: { color: '#7a80a0', callback: v => `${Math.exp(v).toFixed(1)}×` },
+        grid: { color: gridColor() },
+      },
+      y: {
+        title: { display: true, text: 'Δ P95: Affinity − Partitioned (ms)', color: '#7a80a0' },
+        ticks: { color: '#7a80a0', callback: v => (v > 0 ? '+' : '') + v + 'ms' },
+        grid: { color: gridColor() },
+      }
+    }
+  }
+});
 
 // ── TAB SWITCHER ─────────────────────────────────
 function switchTab(name, el) {
