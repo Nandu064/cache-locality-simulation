@@ -46,7 +46,19 @@ Client affinity wins at low α via node-count distribution (queue routing benefi
 - `avg_req/obj < 1.1` → streaming regime, architecture choice doesn't affect cache efficiency
 - `avg_req/obj ≥ 1.1` → reuse regime, use Partitioned over Client Affinity
 
-**4. Non-stochastic oracle trace analysis confirms streaming workload diagnosis.**
+**4. avg_req/obj outperforms chi-square stationarity as an architectural predictor.**
+
+Reproduced Leo Sciortino's chi-square stationarity metric (normalized X²/dof, multinomial test across temporal segments) across all 4 clusters and correlated both metrics against the Partitioned vs Affinity P95 gap:
+
+| Metric | R² vs Part-Affinity gap | Note |
+|---|---|---|
+| log(avg_req/obj) | **0.956** | Simpler, one-pass, directly predictive |
+| log(chi-square X²/dof) | 0.872 | Measures temporal stationarity |
+| LRU hit rate | 0.930 | Requires running the experiment |
+
+Chi-square failed to predict LRU performance improvement (Sciortino et al.'s finding). It partially predicts the Partitioned-Affinity gap (R²=0.872) but avg_req/obj is stronger (R²=0.956). The two metrics agree at extremes (cluster10, cluster24) but diverge at mid-range clusters — they measure different dimensions: reuse density vs temporal stationarity.
+
+**5. Non-stochastic oracle trace analysis confirms streaming workload diagnosis.**
 
 Analysis of cluster10 using the `oracleGeneral` binary format (`next_access_vtime` field):
 
@@ -87,12 +99,14 @@ simulate.py              — experiment engine (workload gen, cache models, MRC,
 run_crossover.py         — multi-cluster crossover experiment (streams traces from URL)
 predict_crossover.py     — prediction model: log(avg_req/obj) → P95 gap, R²=0.977
 analyze_nonstochastic.py — oracle trace analysis (next_access_vtime, one-hit wonders)
+reproduce_chi_square.py  — chi-square stationarity metric (reproduces Sciortino et al.)
 index.html               — interactive dashboard (7 tabs including Crossover Analysis)
 results.json             — synthetic experiment results (220 trials)
 results_cluster24.json   — cluster24 trace experiment results
 crossover_results.json   — 4-cluster crossover experiment results
 prediction_model.json    — fitted model output and decision rule
 results_nonstochastic.json — oracle trace non-stochastic metrics
+chi_square_results.json  — chi-square stationarity values across 4 clusters
 requirements.txt
 ```
 
@@ -102,7 +116,7 @@ requirements.txt
 
 - **Latency model is synthetic.** Lognormal parameters calibrated to typical Redis/DB values, not measured. Results are directionally valid, not quantitative benchmarks.
 - **Queue model is approximate.** Exponential wait rather than M/M/c. Underestimates tail latency under sustained overload.
-- **IRM deviation is approximated.** CoV of inter-access intervals used as IRM deviation proxy; rigorous metrics (Leo Sciortino's toolkit, pending) would strengthen this.
+- **Chi-square comparison uses partial traces.** Our chi-square reproduction uses 800K requests vs Leo's full sample traces (up to 32M requests). Directional ordering is preserved but absolute values differ by ~19×.
 - **Prediction model has 4 data points.** R²=0.977 is promising but needs validation on additional clusters to confirm generality.
 
 ---
@@ -110,7 +124,7 @@ requirements.txt
 ## Next steps
 
 - Validate prediction model on additional Twitter clusters across the α=0.1–2.0 range
-- Incorporate Leo Sciortino's IRM deviation metrics to replace the CoV approximation
+- Understand why chi-square and avg_req/obj diverge on mid-range clusters (cluster19, cluster7)
 - Extend to write-heavy and TTL workloads
 
 ---

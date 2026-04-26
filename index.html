@@ -996,14 +996,24 @@ tbody tr:hover td { background: var(--surface2); }
         </div>
       </div>
       <div style="background:var(--surface2); border-radius:8px; padding:12px; margin-top:auto;">
-        <div style="font-size:11px; color:var(--muted);">Model fit (4 Twitter clusters)</div>
-        <div style="display:flex; gap:16px; margin-top:6px;">
-          <div><div style="font-size:18px; font-weight:700; color:var(--accent2);">0.977</div>
-               <div style="font-size:10px; color:var(--muted);">R² (log avg_req)</div></div>
-          <div><div style="font-size:18px; font-weight:700; color:var(--accent2);">0.930</div>
-               <div style="font-size:10px; color:var(--muted);">R² (LRU hit rate)</div></div>
-          <div><div style="font-size:18px; font-weight:700; color:var(--warn);">~1.1×</div>
-               <div style="font-size:10px; color:var(--muted);">Crossover threshold</div></div>
+        <div style="font-size:11px; color:var(--muted); margin-bottom:6px;">Predictor comparison vs Part-Affinity P95 gap (4 clusters)</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+          <div style="background:rgba(52,211,153,.08); border:1px solid rgba(52,211,153,.2); border-radius:6px; padding:8px; text-align:center;">
+            <div style="font-size:16px; font-weight:700; color:var(--accent2);">0.956</div>
+            <div style="font-size:10px; color:var(--muted);">R² avg_req/obj ✓</div>
+          </div>
+          <div style="background:rgba(108,143,255,.08); border:1px solid rgba(108,143,255,.2); border-radius:6px; padding:8px; text-align:center;">
+            <div style="font-size:16px; font-weight:700; color:var(--accent);">0.872</div>
+            <div style="font-size:10px; color:var(--muted);">R² chi-square</div>
+          </div>
+          <div style="background:rgba(245,158,11,.08); border:1px solid rgba(245,158,11,.2); border-radius:6px; padding:8px; text-align:center;">
+            <div style="font-size:16px; font-weight:700; color:var(--warn);">~1.1×</div>
+            <div style="font-size:10px; color:var(--muted);">Crossover threshold</div>
+          </div>
+        </div>
+        <div style="font-size:11px; color:var(--muted); margin-top:8px; line-height:1.5;">
+          Chi-square (Sciortino et al.) measures temporal stationarity — failed to predict LRU improvement.
+          avg_req/obj measures reuse density — stronger predictor for the architectural crossover.
         </div>
       </div>
     </div>
